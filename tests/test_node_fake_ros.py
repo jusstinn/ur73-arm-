@@ -79,6 +79,12 @@ def install_fake_ros(monkeypatch, world):
 
         def call_async(self, req):
             world.toggles = getattr(world, "toggles", []) + [time.monotonic()]
+            busy_until = time.monotonic() + getattr(world, "gripper_busy_s", 0.0)
+
+            class Done:
+                def done(self):
+                    return time.monotonic() >= busy_until
+            return Done()
 
     class Float64:
         def __init__(self, data=0.0):
@@ -297,11 +303,12 @@ def test_countdown_bounds(monkeypatch, tmp_path):
 def test_hello_toggles_the_gripper_an_even_number_of_times_while_waving(monkeypatch, tmp_path):
     from ur7e_draw import hello
     p = tmp_path / "hello.json"
-    plan = hello.build(waves=1)
+    plan = hello.build(waves=3)
     p.write_text(json.dumps(plan))
     w = World()
     assert run(monkeypatch, tmp_path, w, p) == 0
-    assert len(w.toggles) == hello.GRIPPER_TOGGLES and hello.GRIPPER_TOGGLES % 2 == 0
+    n = len(plan["gripper_toggles_s"])
+    assert len(w.toggles) == n and n % 2 == 0 and n >= 2
     recs = [json.loads(x) for x in (tmp_path / "t.jsonl").read_text().splitlines()]
     taus = [r["tau"] for r in recs if r.get("event") == "gripper_toggle"]
     t0 = len(np.arange(0, 1.5 * 0.36 / hello.SPEED, 0.01)) / 100       # end of the raise
@@ -311,8 +318,22 @@ def test_hello_toggles_the_gripper_an_even_number_of_times_while_waving(monkeypa
 def test_hello_without_gripper_service_still_waves(monkeypatch, tmp_path, capsys):
     from ur7e_draw import hello
     p = tmp_path / "hello.json"
-    p.write_text(json.dumps(hello.build(waves=1)))
+    p.write_text(json.dumps(hello.build(waves=3)))
     w = World()
     w.gripper_service = False
     assert run(monkeypatch, tmp_path, w, p) == 0
     assert not getattr(w, "toggles", []) and "without the gripper" in capsys.readouterr().out
+
+
+def test_slow_gripper_delays_toggles_but_keeps_the_count_even(monkeypatch, tmp_path):
+    from ur7e_draw import hello
+    p = tmp_path / "hello.json"
+    plan = hello.build(waves=2)
+    p.write_text(json.dumps(plan))
+    w = World()
+    w.gripper_busy_s = 1.0                       # a gripper slower than the wave
+    assert run(monkeypatch, tmp_path, w, p) == 0
+    n = len(plan["gripper_toggles_s"])
+    assert len(w.toggles) == n and n % 2 == 0
+    gaps = np.diff(w.toggles)
+    assert np.all(gaps >= 0.95)                  # never sent while the previous was busy

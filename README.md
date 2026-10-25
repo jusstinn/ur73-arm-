@@ -68,15 +68,21 @@ run                 # = ./run.sh hello: 5 s countdown, then the hello
 ```
 
 The arm raises its hand (~0.36 m up, every joint within 0.40 rad of tuck), then waves it left
-and right three times (the base and wrist_2 swing together, the fingertips sweep ~27 cm) while
-the gripper opens and closes four times, then returns to tuck: ~11.6 s at 100 %, ~23 s at 50 %.
-The gripper uses the lab's `/toggle_gripper` service (lab 5); if that service isn't running the
-arm waves without the gripper and says so. An even number of toggles leaves the gripper as it
-started; if a run stops early after an odd number, `./run.sh gripper` toggles it back.
+and right like a hand, six quick swings (~1.1 Hz at 100 % speed, ~0.6 Hz at 50 %; the wrist does
+most of it, the fingertips sweep ~14 cm), opening or closing the gripper at every end of the
+swing, then returns to tuck: ~7.4 s at 100 %, ~15 s at 50 %. Only the wrists move fast (up to
+1.3 rad/s, half their rating); the base, shoulder and elbow stay under 0.5 rad/s.
 
-Tested in the twin at 30 and 50 % slider (every controller variant finishes); at 70-100 % a
-slower-servo variant trips the tracking guard, which stops and holds the arm, so keep the slider
-at 30-50 % until a real run says otherwise. Ctrl-C during the countdown aborts before anything
+The gripper uses the lab's `/toggle_gripper` service (lab 5); if that service isn't running the
+arm waves without the gripper and says so. A toggle is never sent while the previous one is
+still running, so a slow gripper just flaps slower; the total is even, so it ends as it started
+(any toggles still owed are made right after the wave). If a run stops early after an odd
+number, `./run.sh gripper` toggles it back.
+
+Twin: every controller variant finishes at 30 and 50 % slider. At 100 % the variants that match
+the first lab log (controller restarting from the measured state, fast servo) finish; the
+slowest-servo variants trip the tracking guard, which stops and holds the arm. Start at 50 %,
+then try 100 % for the fast wave. Ctrl-C during the countdown aborts before anything
 moves; Ctrl-C later holds where it is. `./run.sh hello 10` gives a 10 s countdown;
 `./run.sh hello 5 --no-gripper` waves without the gripper. Logs: `runs/hello_<time>.jsonl`.
 Preview (arm only, the gripper is not animated): `media/hello_preview.mp4`.

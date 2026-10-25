@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     # the plan may ask for the lab's gripper toggle (std_srvs/Trigger /toggle_gripper, lab 5) at
     # given plan times; the validator never sees it, and without the service the run goes on
     toggles = [] if a.no_gripper else [float(t) for t in plan.get("gripper_toggles_s", [])]
-    grip = {"cli": None, "Req": None, "sent": 0}
+    grip = {"cli": None, "Req": None, "sent": 0, "future": None}
     if toggles:
         try:
             from std_srvs.srv import Trigger
@@ -257,6 +257,13 @@ def main(argv: list[str] | None = None) -> int:
             print(bad, file=sys.stderr)
             return 2
         t_next, t0 = time.monotonic(), time.monotonic()
+
+        def send_toggle(tau: float, t_rel: float) -> None:
+            grip["future"] = grip["cli"].call_async(grip["Req"].Request())
+            grip["sent"] += 1
+            log.write(json.dumps({"event": "gripper_toggle", "n": grip["sent"],
+                                  "tau": round(tau, 3), "t_rel": round(t_rel, 4)}) + "\n")
+
         while True:
             ex.spin_once(timeout_sec=min(0.002, max(0.0, t_next - time.monotonic())))
             now = time.monotonic()
@@ -269,13 +276,21 @@ def main(argv: list[str] | None = None) -> int:
             log.write(json.dumps(rec) + "\n")
             if rec["event"] == "stop":
                 break
-            if grip["sent"] < len(toggles) and st.tau >= toggles[grip["sent"]]:
-                grip["cli"].call_async(grip["Req"].Request())     # never waits on the gripper
-                grip["sent"] += 1
-                log.write(json.dumps({"event": "gripper_toggle", "n": grip["sent"],
-                                      "tau": round(st.tau, 3), "t_rel": round(now - t0, 4)})
-                          + "\n")
+            # due and the previous call finished: toggle (never waits; a busy gripper just
+            # delays the next toggle, so the total stays even and the gripper ends as it began)
+            if grip["sent"] < len(toggles) and st.tau >= toggles[grip["sent"]] and (
+                    grip["future"] is None or grip["future"].done()):
+                send_toggle(st.tau, now - t0)
+        if st.status == "done" and grip["sent"] < len(toggles):
+            # toggles the gripper was too slow for during the wave: finish them, one at a time
+            end = time.monotonic() + 3.0 * (len(toggles) - grip["sent"])
+            while grip["sent"] < len(toggles) and time.monotonic() < end:
+                if grip["future"] is None or grip["future"].done():
+                    send_toggle(st.tau, time.monotonic() - t0)
+                spin_for(0.05)
         print(f"result: {st.status}")
+        if toggles:
+            print(f"gripper: {grip['sent']} of {len(toggles)} toggles")
         if st.status != "done":
             print("stopped early: the arm holds where it is; ./run.sh tuck brings it back")
         if grip["sent"] % 2:

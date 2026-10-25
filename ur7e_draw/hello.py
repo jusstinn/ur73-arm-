@@ -1,5 +1,5 @@
-"""The UR7e says hello: raises its hand, waves it left and right while opening and closing the
-gripper, comes back to tuck.
+"""The UR7e says hello: raises its hand, waves it quickly left and right while the gripper
+opens and closes on every swing, comes back to tuck.
 
     python3 -m ur7e_draw.hello                 # writes plans/hello.json and prints its checks
 
@@ -7,9 +7,11 @@ The greeting from the Loop website, inside the course validator's band: every jo
 within PLAN_RADIUS (0.40 rad) of tuck, so the "raise" is shoulder_lift + elbow + wrist_1 tilted
 toward the band's edge (the flange goes ~0.4 m up, measured below), and the wave is the base
 (shoulder_pan) and wrist_2 swinging in phase: at the raised pose both move the fingertips
-sideways (0.54 and 0.24 m per rad), so the hand sweeps left and right. During the sweep the
-plan asks for GRIPPER_TOGGLES calls to the lab's /toggle_gripper service (an even number, so the
-gripper ends as it started); the node makes them when its plan clock passes each time. Same
+sideways (0.54 and 0.24 m per rad), so the hand sweeps left and right, fast and small like a
+hand (~1.1 Hz at 100 % speed; the wrists may go to 1.6 rad/s, the arm-carrying joints stay
+under 0.5 here). At every end of the sweep the plan asks for a call to the lab's
+/toggle_gripper service (an even number, so the gripper ends as it started); the node makes
+them as its plan clock passes each time. Same
 plan format as
 plans/future.json, so `ur7e_draw.node` plays it with all of its guards (live speed scaling,
 tracking, envelope, stale readings, Ctrl-C hold) and `ur7e_draw.stream` checks it on the twin.
@@ -27,19 +29,20 @@ from pathlib import Path
 import numpy as np
 
 from .kin import TUCK, UR_JOINTS, fk
-from .plan import (CLEARANCE_M, GRIPPER_M, JOINT_SPEED_MAX, PLAN_HZ, PLAN_RADIUS, ROOT,
-                   TABLE_Z_M)
+from .plan import CLEARANCE_M, GRIPPER_M, PLAN_HZ, PLAN_RADIUS, ROOT, SPEED_MAX, TABLE_Z_M
 
 J = {n: i for i, n in enumerate(UR_JOINTS)}
 #: the raised pose, offsets from tuck (rad): the highest tool pose that leaves room for the wave
 RAISE = {"shoulder_lift_joint": 0.36, "elbow_joint": 0.30, "wrist_1_joint": 0.10}
-#: the side-to-side wave's amplitude per joint, rad (in phase: both sweep the hand sideways)
-SWAY = {"shoulder_pan_joint": 0.12, "wrist_2_joint": 0.30}
-GRIPPER_TOGGLES = 4            # open/close calls during the sweep (even: ends as it started)
-SPEED = 0.5                    # rad/s: the raise and the lower (the arm-carrying joints)
-#: rad/s, the flapping wrist's peak (plan limit 0.8); 0.75 tripped a twin variant at 50 %
-WAVE_SPEED = 0.6
-WAVES = 3                      # left-right-left sweeps
+#: the side-to-side wave's amplitude per joint, rad (in phase: both sweep the hand sideways).
+#: Small and fast, like a hand: ~1.1 Hz at 100 % speed (v1, 23 Oct: 0.30 rad at 0.3 Hz)
+SWAY = {"shoulder_pan_joint": 0.05, "wrist_2_joint": 0.18}
+SPEED = 0.5                    # rad/s: the raise, the lower, and the base's sway
+WAVE_SPEED = 1.3               # rad/s: the waving wrist's peak (plan.SPEED_MAX: 1.6)
+WAVES = 6                      # left-right cycles
+#: the gripper opens or closes at every end of the sweep (2 per cycle, an even total), so it
+#: flaps with the hand; the node never sends one before the previous call has finished
+GRIPPER_PER_CYCLE = 2
 
 
 def smooth01(x: np.ndarray) -> np.ndarray:
@@ -56,8 +59,8 @@ def build(speed: float = SPEED, waves: int = WAVES, wave_speed: float = WAVE_SPE
         amp[J[n]] = v
     # a smoothstep peaks at 1.5 x its mean speed; a sine at 2 pi f A
     move_s = 1.5 * float(np.max(np.abs(raised - TUCK))) / speed
-    # each joint under its own bound: the base carries the arm (SPEED), the wrist is light
-    lim = np.where(np.arange(6) == J["shoulder_pan_joint"], speed, wave_speed)
+    # each joint under its own bound: the base carries the arm (SPEED), the wrists are light
+    lim = np.where(np.arange(6) < 3, speed, wave_speed)
     hz = float(np.min(lim[amp > 0] / (2 * math.pi * amp[amp > 0])))
     wave_s = waves / hz
     up = np.arange(0.0, move_s, 1 / PLAN_HZ)
@@ -69,8 +72,12 @@ def build(speed: float = SPEED, waves: int = WAVES, wave_speed: float = WAVE_SPE
     q_down = raised + smooth01(up / move_s)[:, None] * (TUCK - raised)
     Q = np.vstack([q_up, q_wave, q_down, TUCK[None, :]])
     t_wave0 = len(q_up) / PLAN_HZ
-    toggles = [round(t_wave0 + wave_s * (k + 1) / (GRIPPER_TOGGLES + 1), 3)
-               for k in range(GRIPPER_TOGGLES)]
+    # at each end of the sweep (sin = +-1: t = (k + 1/2) / (2 f)), skipping the faded edges
+    ends = [(k + 0.5) / (2 * hz) for k in range(int(2 * waves))]
+    ends = [t for t in ends if 0.5 / hz <= t <= wave_s - 0.5 / hz]
+    if len(ends) % 2:
+        ends = ends[:-1]
+    toggles = [round(t_wave0 + t, 3) for t in ends]
     pen = np.r_[np.zeros(len(q_up)), np.ones(len(q_wave)), np.zeros(len(q_down) + 1)]
     tip = np.array([fk(q)[0] for q in Q])
     fingers = np.array([fk(q, GRIPPER_M)[0] for q in Q[::5]])
@@ -80,8 +87,9 @@ def build(speed: float = SPEED, waves: int = WAVES, wave_speed: float = WAVE_SPE
     problems = []
     if dev.max() > PLAN_RADIUS:
         problems.append(f"a joint goes {dev.max():.3f} rad from tuck (> {PLAN_RADIUS})")
-    if speed_j.max() > JOINT_SPEED_MAX:
-        problems.append(f"a joint moves at {speed_j.max():.3f} rad/s (> {JOINT_SPEED_MAX})")
+    if np.any(speed_j > SPEED_MAX + 1e-9):
+        j = int(np.argmax(speed_j - SPEED_MAX))
+        problems.append(f"{UR_JOINTS[j]} moves at {speed_j[j]:.3f} rad/s (> {SPEED_MAX[j]})")
     if finger_z < TABLE_Z_M + CLEARANCE_M:
         problems.append(f"fingertips come within {finger_z - TABLE_Z_M:.3f} m of the table")
     if np.max(np.abs(Q[0] - TUCK)) > 1e-9 or np.max(np.abs(Q[-1] - TUCK)) > 1e-9:

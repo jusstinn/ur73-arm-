@@ -31,6 +31,9 @@ from .letters import stroke_curves, stroke_pieces, resample
 PLAN_HZ = 100.0
 PLAN_RADIUS = 0.40            # rad, max |q - tuck| any joint, anywhere in the plan
 JOINT_SPEED_MAX = 0.8         # rad/s, any joint, at 100 % speed slider (UR7e limit 3.14)
+#: per joint (UR order): the arm-carrying joints keep JOINT_SPEED_MAX; the light wrists may go
+#: to 1.6 rad/s (half their 3.14 rating) for the hello wave. The drawing stays under 0.8.
+SPEED_MAX = np.array([JOINT_SPEED_MAX] * 3 + [1.6] * 3)
 GRIPPER_M = 0.14              # flange -> fingertips (lab5 main.py GRIPPER_LENGTH; measure it)
 TABLE_Z_M = -0.20             # table top in the base frame, estimated from lab5's cube z
 CLEARANCE_M = 0.15            # fingertips stay this far above the table

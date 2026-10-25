@@ -172,9 +172,11 @@ def test_hello_plan_limits_and_twin():
     Q = np.array(pl["q"])
     assert np.max(np.abs(Q - kin.TUCK)) <= P.PLAN_RADIUS + 1e-9
     assert np.allclose(Q[0], kin.TUCK) and np.allclose(Q[-1], kin.TUCK)
-    assert max(pl["checks"]["max_joint_speed_rad_s"].values()) <= P.JOINT_SPEED_MAX + 1e-6
+    sp = np.array(list(pl["checks"]["max_joint_speed_rad_s"].values()))
+    assert np.all(sp <= P.SPEED_MAX + 1e-6) and sp[:3].max() <= 0.5 + 1e-6   # arm joints slow
     assert pl["checks"]["flange_rise_m"] > 0.3                      # it really raises
-    assert pl["checks"]["fingertip_sweep_m"] > 0.2                  # and sweeps left-right
+    assert pl["checks"]["fingertip_sweep_m"] > 0.1                  # and sweeps left-right
+    assert pl["checks"]["wave_hz"] > 1.0                            # like a hand
     assert len(pl["gripper_toggles_s"]) % 2 == 0
     assert pl["checks"]["fingertip_above_table_m"] >= P.CLEARANCE_M
     for s in (0.3, 0.5):

@@ -17,7 +17,8 @@ Guards (any one stops the run and holds the arm where it is):
     envelope    a measured joint more than ABORT_RADIUS from tuck
     tracking    the arm more than TRACK_TOL behind/off the plan on any joint (this also catches
                 a --speed-slider set higher than the pendant's before the word smears)
-Every goal is clamped to tuck +- CLAMP_RADIUS and to STEP rad of the measured position.
+Every goal is clamped to tuck +- CLAMP_RADIUS and to STEP rad (per joint) of the measured
+position.
 
     python3 -m ur7e_draw.stream               # twin check of plans/future.json (no ROS)
 """
@@ -46,7 +47,9 @@ ABORT_RADIUS = 0.48         # a measured joint past this ends the run
 START_TOL = 0.05            # rad: start only this close to tuck
 STALE_S = 0.2
 TRACK_TOL = 0.10            # rad, measured vs plan(clock), any joint
-STEP = 0.8 / RATE_HZ        # rad per tick max lead of a goal over the measurement
+#: rad per tick max lead of a goal over the measurement, per joint (UR order): the plan's
+#: speed limit per joint (plan.SPEED_MAX: 0.8 rad/s arm, 1.6 rad/s wrists) over one tick
+STEP = np.array([0.8] * 3 + [1.6] * 3) / RATE_HZ
 MIN_SCALE = 0.02            # below this the robot counts as paused (program paused / slider 0)
 PAUSE_S = 10.0              # paused this long -> stop
 
