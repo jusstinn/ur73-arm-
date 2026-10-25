@@ -19,6 +19,30 @@ from .plan import ROOT, load
 UR_XML = Path.home() / "loop-data/menagerie_ur/universal_robots_ur5e/ur5e.xml"
 
 
+def add_gripper(spec, length: float) -> None:
+    """A two-finger parallel gripper on the flange, at the course's dimensions (lab5
+    obstacles.yaml: a 6.5 x 6.5 x 17 cm block on the flange; fingertips `length` out)."""
+    import mujoco
+
+    site = spec.site("attachment_site")
+    body = spec.body("wrist_3_link").add_body(name="gripper", pos=site.pos, quat=site.quat)
+    dark, alu, pad = [0.12, 0.12, 0.13, 1], [0.62, 0.63, 0.66, 1], [0.05, 0.05, 0.05, 1]
+    box, cyl = mujoco.mjtGeom.mjGEOM_BOX, mujoco.mjtGeom.mjGEOM_CYLINDER
+    palm = length - 0.055                                    # fingers are the last 5.5 cm
+    body.add_geom(type=cyl, size=[0.034, 0.006, 0], pos=[0, 0, 0.006], rgba=alu)   # coupling
+    body.add_geom(type=cyl, size=[0.031, 0.020, 0], pos=[0, 0, 0.032], rgba=dark)  # housing
+    body.add_geom(type=box, size=[0.0325, 0.022, (palm - 0.052) / 2],
+                  pos=[0, 0, 0.052 + (palm - 0.052) / 2], rgba=dark)
+    body.add_geom(type=box, size=[0.040, 0.014, 0.006], pos=[0, 0, palm - 0.004], rgba=alu)
+    for side in (-1, 1):                                     # knuckles + fingers, half open
+        body.add_geom(type=box, size=[0.006, 0.011, 0.016],
+                      pos=[side * 0.030, 0, palm + 0.016], rgba=alu)
+        body.add_geom(type=box, size=[0.005, 0.010, 0.020],
+                      pos=[side * 0.020, 0, length - 0.020], rgba=dark)
+        body.add_geom(type=box, size=[0.0015, 0.010, 0.014],
+                      pos=[side * 0.0135, 0, length - 0.016], rgba=pad)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python3 -m ur7e_draw.preview", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -55,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                      height=64)
     spec.worldbody.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[0, 0, 0.05],
                             rgba=[0.08, 0.085, 0.1, 1])
+    add_gripper(spec, grip)
     m = spec.compile()
     dd = mujoco.MjData(m)
     adr = [m.jnt_qposadr[mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_JOINT, n)] for n in UR_JOINTS]
@@ -73,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     with imageio.get_writer(a.out, fps=a.fps, codec="libx264", quality=8,
                             macro_block_size=1) as w:
         for k in idx:
-            tip, flange = fk(Q[k], grip)[0], fk(Q[k])[0]
+            tip = fk(Q[k], grip)[0]
             if pen[k] and prev is not None and prev[1]:
                 trail.append((prev[0], tip))
             prev = (tip, bool(pen[k]))
@@ -89,12 +114,6 @@ def main(argv: list[str] | None = None) -> int:
                                     eye, ink)
                 mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_CAPSULE, 0.003, a_, b_)
                 g.emission = 0.9
-                sc.ngeom += 1
-            if sc.ngeom < sc.maxgeom:                      # the gripper, as a stand-in bar
-                g = sc.geoms[sc.ngeom]
-                mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_CAPSULE, np.zeros(3), np.zeros(3),
-                                    eye, np.array([0.2, 0.2, 0.22, 1], np.float32))
-                mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_CAPSULE, 0.02, flange, tip)
                 sc.ngeom += 1
             w.append_data(r.render())
     r.close()
