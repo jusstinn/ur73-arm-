@@ -40,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         p = load(a.plan)
         Q, pen = p["q"], p["pen"]
         t = np.arange(len(Q)) / p["hz"]
+    grip = load(a.plan)["params"].get("gripper", 0.14)
     frames_t = np.arange(0, t[-1], 1 / a.fps)
     idx = np.searchsorted(t, frames_t).clip(0, len(Q) - 1)
 
@@ -61,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     p0 = fk(Q[0])[0]
     out = np.array([p0[0], p0[1], 0.0]) / np.linalg.norm(p0[:2])
     cam = mujoco.MjvCamera()                    # beyond the tool, looking back at the robot
-    cam.lookat[:] = p0 * np.array([0.6, 0.6, 1.0])
+    cam.lookat[:] = p0 * np.array([0.6, 0.6, 1.0]) - np.array([0, 0, 0.07])
     cam.distance, cam.elevation = 1.3, 5.0
     cam.azimuth = float(np.degrees(np.arctan2(-out[1], -out[0])))
     ink = np.array([0.35, 0.85, 1.0, 1.0], np.float32)
@@ -72,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     with imageio.get_writer(a.out, fps=a.fps, codec="libx264", quality=8,
                             macro_block_size=1) as w:
         for k in idx:
-            tip = fk(Q[k])[0]
+            tip, flange = fk(Q[k], grip)[0], fk(Q[k])[0]
             if pen[k] and prev is not None and prev[1]:
                 trail.append((prev[0], tip))
             prev = (tip, bool(pen[k]))
@@ -88,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
                                     eye, ink)
                 mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_CAPSULE, 0.003, a_, b_)
                 g.emission = 0.9
+                sc.ngeom += 1
+            if sc.ngeom < sc.maxgeom:                      # the gripper, as a stand-in bar
+                g = sc.geoms[sc.ngeom]
+                mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_CAPSULE, np.zeros(3), np.zeros(3),
+                                    eye, np.array([0.2, 0.2, 0.22, 1], np.float32))
+                mujoco.mjv_connector(g, mujoco.mjtGeom.mjGEOM_CAPSULE, 0.02, flange, tip)
                 sc.ngeom += 1
             w.append_data(r.render())
     r.close()

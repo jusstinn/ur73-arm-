@@ -6,7 +6,8 @@
 Writes next to the log: <name>.drawn.svg (the measured flange path, pen-down parts in black
 over the plan in light grey, in stroke order: animate with stroke-dashoffset) and
 <name>.drawn.json (per tick: time, joints in UR order, flange xyz, word-plane u/v in metres,
-pen flag) for driving an animation.
+pen flag) for driving an animation. `tip` is the flange, `fingertip` the gripper tips (same word,
+shifted down by the gripper length, since the tool keeps its orientation).
 """
 
 from __future__ import annotations
@@ -83,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
         pen = plan["pen"][k]
         base = a.log.with_suffix("")
     tips = np.array([fk(q)[0] for q in Q])
+    fingers = np.array([fk(q, plan["params"].get("gripper", 0.0))[0] for q in Q])
     w = uv(tips, plan)
     planned = segments(uv(plan["tip"], plan), plan["pen"])
     drawn = segments(w, pen)
@@ -90,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     Path(f"{base}.drawn.json").write_text(json.dumps({
         "joint_order": plan["joint_order"], "frame": plan["frame"],
         "t": t.round(4).tolist(), "q": Q.round(6).tolist(), "tip": tips.round(5).tolist(),
+        "fingertip": fingers.round(5).tolist(),
         "uv": w.round(5).tolist(), "pen": pen.astype(int).tolist()}))
     print(f"wrote {base}.drawn.svg and {base}.drawn.json ({len(drawn)} pen-down strokes)")
     return 0

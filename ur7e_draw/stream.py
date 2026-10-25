@@ -14,7 +14,8 @@ safe: too high and the tracking guard stops the run, too low and the arm just wa
 Guards (any one stops the run and holds the arm where it is):
     stale       no /joint_states for STALE_S -> publish nothing more
     envelope    a measured joint more than ABORT_RADIUS from tuck
-    tracking    the arm more than TRACK_TOL behind/off the plan on any joint
+    tracking    the arm more than TRACK_TOL behind/off the plan on any joint (this also catches
+                a --speed-slider set higher than the pendant's before the word smears)
 Every goal is clamped to tuck +- CLAMP_RADIUS and to STEP rad of the measured position.
 
     python3 -m ur7e_draw.stream               # twin check of plans/future.json (no ROS)
@@ -67,6 +68,10 @@ class Streamer:
         f = x - i
         return self.Q[i] * (1 - f) + self.Q[i + 1] * f
 
+    def dev(self, tau: float) -> float:
+        """Measured arm vs plan(tau), max over joints, rad."""
+        return float(np.max(np.abs(self.q - self.plan_at(tau))))
+
     def on_state(self, t: float, q: np.ndarray) -> None:
         self.q, self.t_q = np.asarray(q, dtype=float), float(t)
 
@@ -89,7 +94,7 @@ class Streamer:
             elif self.q is not None:
                 if np.any(np.abs(self.q - TUCK) > ABORT_RADIUS):
                     self.status = "left_envelope"
-                elif np.max(np.abs(self.q - self.plan_at(tau))) > TRACK_TOL:
+                elif self.dev(tau) > TRACK_TOL:
                     self.status = "tracking"
                 elif tau >= self.T and np.max(np.abs(self.q - TUCK)) < 0.01:
                     self.status = "done"
@@ -103,7 +108,7 @@ class Streamer:
         goal = np.clip(self.plan_at(tau + self.look), self.q - STEP, self.q + STEP)
         goal = np.clip(goal, TUCK - CLAMP_RADIUS, TUCK + CLAMP_RADIUS)
         return goal, {**rec, "event": "goal", "goal": goal.tolist(),
-                      "dev": round(float(np.max(np.abs(self.q - self.plan_at(tau)))), 4)}
+                      "dev": round(self.dev(tau), 4)}
 
 
 @dataclass

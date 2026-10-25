@@ -39,6 +39,17 @@ def test_committed_plan_is_fresh_and_safe(committed):
     assert set(committed["stroke"]) == {-1, 0, 1, 2}
 
 
+def test_under_a_minute_at_30_percent(committed):
+    assert committed["checks"]["seconds"] * 100 / 30 < 60
+
+
+def test_gripper_clearance(committed):
+    c = committed["checks"]
+    assert c["fingertip_above_table_m"] >= P.CLEARANCE_M
+    with pytest.raises(ValueError, match="table"):
+        P.build(gripper=0.45)
+
+
 def test_planner_refuses_too_big():
     with pytest.raises(ValueError, match="from tuck"):
         P.build(scale=0.14)
@@ -61,7 +72,7 @@ def test_every_goal_passes_the_validator(committed):
     assert st.status == "done"
 
 
-@pytest.mark.parametrize("slider", [1.0, 0.3])
+@pytest.mark.parametrize("slider", [0.5, 0.3])
 def test_twin_grid_draws_the_word(committed, slider):
     res = S.twin_grid(committed, slider, jitter_s=0.01)
     for k, v in res.items():

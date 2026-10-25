@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One entry point for the lab computer. Run from anywhere; everything is relative to this repo.
 #
-#   ./run.sh check            no ROS: plan limits + controller-twin check of plans/future.json
+#   ./run.sh check            no ROS: plan limits + controller-twin check at 30 and 50 % slider
 #   ./run.sh validator        terminal A: the course's validate_trajectory node (leave it running)
 #   ./run.sh dry  <slider%>   terminal B: ROS checks only (joint states, at tuck, validator up)
 #   ./run.sh draw <slider%>   terminal B: DRAWS ON THE ARM (Enter to start, Ctrl-C = hold)
@@ -38,8 +38,10 @@ shift || true
 case "$cmd" in
   check)
     need_numpy
-    python3 -m ur7e_draw.stream --speed-slider 100
-    python3 -m ur7e_draw.stream --speed-slider 30 --jitter-ms 10 | tail -1
+    python3 -m ur7e_draw.plan --out /tmp/ur7e_draw_check.json | grep -E '"seconds"|fingertip_above'
+    for s in 30 50; do
+      echo -n "slider $s %: "; python3 -m ur7e_draw.stream --speed-slider $s --jitter-ms 10 | tail -1
+    done
     ;;
   validator)
     ros_env

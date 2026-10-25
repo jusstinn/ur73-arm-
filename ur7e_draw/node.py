@@ -139,10 +139,17 @@ def main(argv: list[str] | None = None) -> int:
             if not a.dry_run:
                 return 2
         c = plan["checks"]
+        dur = c["seconds"] * 100 / a.speed_slider
         print(f"plan {a.plan.name}: '{plan['word']}', {c['word_box_m']['width']:.2f} x "
               f"{c['word_box_m']['height']:.2f} m around the tuck flange, "
-              f"{c['seconds'] * 100 / a.speed_slider:.0f} s at {a.speed_slider:.0f} % slider; "
+              f"{dur:.0f} s at {a.speed_slider:.0f} % slider; "
               f"every joint within {max(c['max_dev_from_tuck_rad'].values()):.2f} rad of tuck")
+        if dur > 60:
+            print(f"note: over a minute at this slider; >= "
+                  f"{np.ceil(c['seconds'] * 100 / 60):.0f} % gets it under 60 s")
+        if a.speed_slider > 50:
+            print("note: above 50 % the letters may smear or the tracking guard may stop the "
+                  "run (twin); 30-50 % is the tested range")
         log.write(json.dumps({"event": "header", "trial": trial, "plan": str(a.plan),
                               "params": plan["params"], "speed_slider_pct": a.speed_slider,
                               "rate_hz": RATE_HZ, "horizon_s": st.horizon_s,

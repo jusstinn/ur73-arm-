@@ -1,7 +1,8 @@
 # UR7e writes "future" in the air
 
-The lab UR7e writes a cursive **future** with its flange, about 33 × 15 cm, in the air in front
-of its tuck pose. Every command goes through the course's `validate_trajectory` node.
+The lab UR7e writes a cursive **future**, about 33 × 15 cm, in the air in front of its tuck
+pose, in **under a minute** (56 s at 30 % speed slider, 34 s at 50 %). Every command goes
+through the course's `validate_trajectory` node. The gripper stays on and isn't commanded.
 
 ![preview](media/future_preview.png)
 
@@ -27,19 +28,21 @@ Then:
    does, and start the External Control program on the pendant.
 2. Put the arm in **tuck** the lab's way. The script refuses to start more than 0.05 rad
    from tuck on any joint.
-3. Set the pendant's **speed slider to 30 %** for the first run and read the number off the
-   pendant.
-4. Clear a box about 45 cm wide, 25 cm tall and 10 cm deep around the tool, plus the arm's
-   space between there and the base.
+3. Set the pendant's **speed slider to 30 %** for the first run (56 s), then 50 % (34 s) if
+   you want it faster. Read the number off the pendant. 30-50 % is the tested range.
+4. Clear a box about 45 cm wide, 30 cm tall and 10 cm deep around the gripper, plus the
+   arm's space between there and the base. The tool keeps its tuck orientation (gripper
+   pointing down), so the fingertips trace the same word 14 cm below the flange. They stay
+   about 0.4 m above the table (the planner refuses less than 0.15 m).
 5. Terminal A, left running:
    ```bash
    ./run.sh validator
    ```
 6. Terminal B:
    ```bash
-   ./run.sh check        # no ROS: plan + controller-twin check (should print "all variants finish")
+   ./run.sh check        # no ROS: plan + twin check (should print "all variants finish" twice)
    ./run.sh dry 30       # ROS checks only: joint states, at tuck, validator listening; moves nothing
-   ./run.sh draw 30      # hand on the e-stop, Enter starts. Takes ~2 min at 30 %, ~40 s at 100 %
+   ./run.sh draw 30      # hand on the e-stop, Enter starts. 56 s at 30 %, 34 s at 50 %
    ./run.sh trace        # the path the arm actually drew -> runs/<name>.drawn.svg / .drawn.json
    ```
 7. To bring the data home:
@@ -67,10 +70,12 @@ Then `./run.sh check` and run as above. The planner refuses any plan that leaves
 - **`ur7e_draw/plan.py`**: the letters (`letters.py`, one cursive stroke plus the f and t
   crossbars) go on the vertical plane through the tuck flange position. IK (UR DH,
   damped least squares) runs at 100 Hz with the tool held at its tuck orientation. The flange
-  moves at 8 cm/s, comes to rest at sharp corners, and pulls back 3 cm toward the base
-  between strokes. The plan starts and ends exactly at tuck. Checks: every joint within
-  0.40 rad of tuck (max used: 0.28), joint speed ≤ 0.6 rad/s (max used: 0.25), IK error
-  < 0.01 mm. The result is `plans/future.json`.
+  writes at 20 cm/s (at 100 % slider), comes to rest at sharp corners, and arcs 3 cm back
+  toward the base between strokes. The plan starts and ends exactly at tuck: 16.8 s at
+  100 %. Checks: every joint within 0.40 rad of tuck (max used: 0.28), joint speed
+  ≤ 0.8 rad/s (max used: 0.56, against a UR7e limit of 3.14), fingertips ≥ 0.15 m above
+  the table (gripper 0.14 m from lab5; table at z ≈ −0.20 m estimated from lab5's cube
+  pose; `--gripper` to change), IK error < 0.01 mm. The result is `plans/future.json`.
 - **`ur7e_draw/stream.py`**: the validator only takes one point, zero velocities, the
   validator's joint order, and every joint within 0.5 rad of tuck. So the plan streams at
   25 Hz as one single-point trajectory per tick, each lasting one tick and aiming one tick
@@ -79,8 +84,10 @@ Then `./run.sh check` and run as above. The planner refuses any plan that leaves
   → stop and hold. Goals are clamped to tuck ± 0.45 rad and to 0.032 rad per tick from the
   measured position.
 - **Controller twin** (`JTCTwin`, a kinematic model of the scaled JTC): tested with both
-  restart behaviours × 4 servo lags × slider 100/50/30/10 % × ±15 ms timing jitter. Every
-  case finishes, and the letters stay within 4 mm of the plan.
+  restart behaviours × 4 servo lags × ±15 ms timing jitter. At 30 % and 50 % slider every
+  case finishes and the letters stay within 6 mm of the plan. At 100 %, the two 60 ms
+  servo-lag cases trip the tracking guard and stop safely. The guard also stops a run where
+  `--speed-slider` is set higher than the pendant before the word smears.
 - **`ur7e_draw/node.py`**: the ROS 2 shell. It reads `/joint_states` (any joint order) and
   publishes ONLY to `/joint_trajectory_validated`. Logs every tick to `runs/<name>.jsonl`.
 - **`ur7e_draw/trace.py`**: turns the log into the measured flange path. You get an SVG in
