@@ -6,10 +6,11 @@ joint-name order and every target within 0.5 rad of tuck. So the plan goes out a
 single-point trajectory per tick: goal = plan(clock + lookahead), time_from_start = horizon.
 Each new trajectory replaces the last, and the controller blends them (`JTCTwin` models it).
 
-Plan clock: runs at the teach pendant's speed slider s. The scaled controller stretches every
-segment by 1/s, so time_from_start is s * TICK_S (one tick of real time) and the lookahead is
-s * TICK_S of plan time: a slow slider plays the same shape slower. A wrong --speed-slider is
-safe: too high and the tracking guard stops the run, too low and the arm just waits.
+Plan clock: runs at the robot's live speed scaling s (the node reads it from
+/speed_scaling_state_broadcaster/speed_scaling: the pendant slider, 0 when paused). The scaled
+controller stretches every segment by 1/s, so time_from_start is s * TICK_S (one tick of real
+time) and the lookahead is s * TICK_S of plan time: a slow slider plays the same shape slower.
+If s were wrong (first lab run, 24 Oct: told 30 %, robot at ~6 %) the tracking guard stops.
 
 Guards (any one stops the run and holds the arm where it is):
     stale       no /joint_states for STALE_S -> publish nothing more
@@ -46,6 +47,8 @@ START_TOL = 0.05            # rad: start only this close to tuck
 STALE_S = 0.2
 TRACK_TOL = 0.10            # rad, measured vs plan(clock), any joint
 STEP = 0.8 / RATE_HZ        # rad per tick max lead of a goal over the measurement
+MIN_SCALE = 0.02            # below this the robot counts as paused (program paused / slider 0)
+PAUSE_S = 10.0              # paused this long -> stop
 
 
 class Streamer:
@@ -54,13 +57,28 @@ class Streamer:
     def __init__(self, plan: dict, speed_scale: float = 1.0):
         self.Q, self.hz = plan["q"], float(plan["hz"])
         self.T = (len(self.Q) - 1) / self.hz
-        self.s = float(speed_scale)
-        self.horizon_s = self.s * TICK_S          # time_from_start to publish
-        self.look = self.s * TICK_S               # plan time
+        self.s = float(speed_scale)               # the controller's speed scaling, 0..1
+        self.tau = 0.0                            # plan clock
         self.q: np.ndarray | None = None
         self.t_q: float | None = None
         self.t0: float | None = None
+        self.t_last: float | None = None
+        self.t_end: float | None = None           # when the clock reached the plan's end
+        self.t_slow: float | None = None          # since when the scaling has been ~0
         self.status: str | None = None
+
+    def set_scale(self, s: float) -> None:
+        """The robot's live speed scaling (0..1): the pendant slider, or 0 when paused."""
+        self.s = min(max(float(s), 0.0), 1.0)
+
+    @property
+    def horizon_s(self) -> float:
+        """time_from_start to publish: one tick of real time once the controller scales it."""
+        return max(self.s, MIN_SCALE) * TICK_S
+
+    @property
+    def look(self) -> float:
+        return self.s * TICK_S                    # plan time
 
     def plan_at(self, tau: float) -> np.ndarray:
         x = min(max(tau, 0.0), self.T) * self.hz
@@ -83,9 +101,14 @@ class Streamer:
     def on_tick(self, t: float) -> tuple[np.ndarray | None, dict[str, Any]]:
         """-> (goal to publish or None, log record)."""
         if self.t0 is None:
-            self.t0 = t
-        tau = (t - self.t0) * self.s
-        rec: dict[str, Any] = {"t": t, "tau": round(tau, 4),
+            self.t0 = self.t_last = t
+        self.tau += self.s * (t - self.t_last)    # the clock runs at the robot's own speed
+        self.t_last = t
+        tau = self.tau
+        if tau >= self.T and self.t_end is None:
+            self.t_end = t
+        self.t_slow = (self.t_slow or t) if self.s < MIN_SCALE else None
+        rec: dict[str, Any] = {"t": t, "tau": round(tau, 4), "scale": round(self.s, 4),
                                "q": None if self.q is None else self.q.tolist()}
         if self.status is None:
             last = self.t_q if self.t_q is not None else self.t0
@@ -98,8 +121,10 @@ class Streamer:
                     self.status = "tracking"
                 elif tau >= self.T and np.max(np.abs(self.q - TUCK)) < 0.01:
                     self.status = "done"
-                elif tau >= self.T + 5.0:
+                elif self.t_end is not None and t - self.t_end > 5.0:
                     self.status = "done_not_settled"
+                elif self.t_slow is not None and t - self.t_slow > PAUSE_S:
+                    self.status = "paused"
         if self.status is not None:
             goal = None if self.status == "stale_state" else self.hold()
             return goal, {**rec, "event": "stop", "status": self.status}

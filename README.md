@@ -34,14 +34,17 @@ External Control program must be running.
    ./run.sh validator    # = ros2 run joint_control validate_trajectory
    ```
 3. Set the pendant's **speed slider to 30 %** (56 s run; 50 % = 34 s; tested range 30-50 %).
+   Check what the robot actually reports with `./run.sh speed` (data: 30.0). The first lab
+   run stopped because the robot was at ~6 % while 30 was typed. The node now reads this value
+   itself and follows it live.
    Clear about 45 cm wide, 30 cm tall and 10 cm deep around the gripper, plus the arm's space
    between there and the base.
 4. **Terminal C**:
    ```bash
    ./run.sh check        # no ROS: should print "all variants finish" twice
    ./run.sh tuck         # = ros2 run ur7e_utils tuck (moves the arm to tuck)
-   ./run.sh dry 30       # ROS checks only, moves nothing: "dry run OK ... validator listening"
-   ./run.sh draw 30      # hand on the e-stop, Enter starts; ~56 s, ends back at tuck
+   ./run.sh dry          # ROS checks only, moves nothing: prints the robot's speed + "dry run OK"
+   ./run.sh draw         # hand on the e-stop, Enter starts; ~56 s at 30 %, ends back at tuck
    ./run.sh trace        # the path it actually drew -> runs/<name>.drawn.svg / .drawn.json
    ```
 5. To bring the data home:
@@ -49,9 +52,10 @@ External Control program must be running.
    git add runs && git commit -m "UR7e draw run" && git push
    ```
 
-The number after `dry` and `draw` is the speed slider's %. If it's wrong, nothing unsafe
-happens: too high and the tracking guard stops the run; too low and the arm just waits for
-each goal. Ctrl-C at any time sends a hold at the current position.
+The plan clock follows the robot's live speed scaling (`/speed_scaling_state_broadcaster/
+speed_scaling`). Moving the slider mid-run just changes the pace, and pausing the program
+pauses the drawing (stopped after 10 s paused). A number after `dry` or `draw` is only a
+cross-check. Ctrl-C at any time sends a hold at the current position.
 
 ### Where to stand or film
 
@@ -83,7 +87,8 @@ Then `./run.sh check` and run as above. The planner refuses any plan that leaves
   → stop and hold. Goals are clamped to tuck ± 0.45 rad and to 0.032 rad per tick from the
   measured position.
 - **Controller twin** (`JTCTwin`, a kinematic model of the scaled JTC): tested with both
-  restart behaviours × 4 servo lags × ±15 ms timing jitter. At 30 % and 50 % slider every
+  restart behaviours × 4 servo lags × ±15 ms timing jitter. The first lab log fits the
+  "restart from measured" behaviour with a tight servo. At 30 % and 50 % slider every
   case finishes and the letters stay within 6 mm of the plan. At 100 %, the two 60 ms
   servo-lag cases trip the tracking guard and stop safely. The guard also stops a run where
   `--speed-slider` is set higher than the pendant before the word smears.

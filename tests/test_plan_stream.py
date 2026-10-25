@@ -128,3 +128,36 @@ def test_trace_plan_only(tmp_path):
     d = json.loads((tmp_path / "plan.drawn.json").read_text())
     assert len(d["uv"]) == len(d["pen"])
     assert (tmp_path / "plan.drawn.svg").read_text().count('id="stroke') == 3
+
+
+def test_replays_the_first_lab_run(committed):
+    """24 Oct lab log: told 30 %, the robot ran at ~6 % (fit: measured restart, tight servo).
+    Following the live scaling, the same situation now draws the word."""
+    tw = S.JTCTwin(S.TICK_S, "measured", 0.005, speed_scale=0.06)
+    st = S.Streamer(committed, 0.3)
+    tw.reset(kin.TUCK.copy())
+    t = 0.0
+    while st.status is None and t < 400:
+        st.set_scale(0.06)                                   # what the driver reports
+        st.on_state(t, tw.q)
+        g, _ = st.on_tick(t)
+        if g is not None:
+            tw.horizon_s = st.horizon_s
+            tw.command(g)
+        for _ in range(int(S.TICK_S / tw.dt)):
+            tw.step()
+        t += S.TICK_S
+    assert st.status == "done"
+
+
+def test_pause_stops_after_a_while(committed):
+    st = S.Streamer(committed, 0.3)
+    st.on_state(0.0, kin.TUCK)
+    st.on_tick(0.0)
+    st.set_scale(0.0)
+    t = 0.0
+    while st.status is None and t < 20:
+        t += S.TICK_S
+        st.on_state(t, kin.TUCK)
+        st.on_tick(t)
+    assert st.status == "paused" and S.PAUSE_S <= t < S.PAUSE_S + 1

@@ -5,8 +5,9 @@
 #   ./run.sh comms            terminal A: connect ROS to the arm (ur7e_utils enable_comms), leave running
 #   ./run.sh validator        terminal B: the course's validate_trajectory node, leave running
 #   ./run.sh tuck             terminal C: the lab's tuck (MOVES THE ARM to tuck)
-#   ./run.sh dry  <slider%>   terminal C: ROS checks only (joint states, at tuck, validator up)
-#   ./run.sh draw <slider%>   terminal C: DRAWS ON THE ARM (Enter to start, Ctrl-C = hold)
+#   ./run.sh speed            terminal C: the robot's real speed scaling in % (pendant slider)
+#   ./run.sh dry  [slider%]   terminal C: ROS checks only (joint states, at tuck, validator, speed)
+#   ./run.sh draw [slider%]   terminal C: DRAWS ON THE ARM (Enter to start, Ctrl-C = hold)
 #   ./run.sh trace [log]      the drawn path of the last run (or of <log>) -> .drawn.svg/.json
 #   ./run.sh plan [args]      re-plan (e.g. --mirror, --scale 0.06); see python3 -m ur7e_draw.plan -h
 set -euo pipefail
@@ -41,11 +42,9 @@ need_numpy() {
   python3 -c "import numpy" 2>/dev/null || { echo "numpy missing: pip3 install --user numpy" >&2; exit 2; }
 }
 
-slider() {
-  if [ -z "${1:-}" ]; then
-    echo "give the teach pendant's speed slider in %, e.g. ./run.sh $cmd 30" >&2
-    exit 2
-  fi
+slider_arg() {
+  # optional: the node follows the robot's own speed scaling; a typed % is only a cross-check
+  if [ -n "${1:-}" ]; then echo "--speed-slider $1"; fi
 }
 
 cmd="${1:-help}"
@@ -70,13 +69,18 @@ case "$cmd" in
     ros_env; lab_ws
     exec ros2 run ur7e_utils tuck
     ;;
+  speed)
+    ros_env
+    timeout 5 ros2 topic echo --once /speed_scaling_state_broadcaster/speed_scaling \
+      || echo "no speed scaling topic: is ./run.sh comms running?" >&2
+    ;;
   dry)
-    slider "${1:-}"; ros_env; need_numpy
-    python3 -m ur7e_draw.node --speed-slider "$1" --dry-run "${@:2}"
+    ros_env; need_numpy
+    python3 -m ur7e_draw.node $(slider_arg "${1:-}") --dry-run
     ;;
   draw)
-    slider "${1:-}"; ros_env; need_numpy
-    python3 -m ur7e_draw.node --speed-slider "$1" "${@:2}"
+    ros_env; need_numpy
+    python3 -m ur7e_draw.node $(slider_arg "${1:-}")
     ;;
   trace)
     need_numpy
@@ -94,6 +98,6 @@ case "$cmd" in
     python3 -m ur7e_draw.plan "$@"
     ;;
   *)
-    sed -n '2,11p' "$0"
+    sed -n '2,12p' "$0"
     ;;
 esac

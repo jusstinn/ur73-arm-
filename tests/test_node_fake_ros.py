@@ -18,8 +18,10 @@ from ur7e_draw.stream import JTCTwin
 
 
 class World:
-    def __init__(self, subscribers=1, interrupt_after=None, q0=None, slider=1.0):
-        self.twin = JTCTwin(0.04, "desired", 0.015, speed_scale=slider)
+    def __init__(self, subscribers=1, interrupt_after=None, q0=None, slider=1.0,
+                 restart="desired", reports_scale=True):
+        self.twin = JTCTwin(0.04, restart, 0.015, speed_scale=slider)
+        self.slider, self.reports_scale, self.scale_cb = slider, reports_scale, None
         self.twin.reset(kin.TUCK.copy() if q0 is None else q0)
         self.t_wall = self.t0 = time.monotonic()
         self.sent, self.subscribers, self.callback = [], subscribers, None
@@ -61,6 +63,13 @@ def install_fake_ros(monkeypatch, world):
     bi, bim = mod("builtin_interfaces"), mod("builtin_interfaces.msg")
     mod("sensor_msgs")
     sm = mod("sensor_msgs.msg")
+    mod("std_msgs")
+    stdm = mod("std_msgs.msg")
+
+    class Float64:
+        def __init__(self, data=0.0):
+            self.data = data
+    stdm.Float64 = Float64
     mod("trajectory_msgs")
     tm = mod("trajectory_msgs.msg")
     bi.msg = bim
@@ -107,6 +116,9 @@ def install_fake_ros(monkeypatch, world):
             return Pub()
 
         def create_subscription(self, typ, topic, cb, qos):
+            if topic == "/speed_scaling_state_broadcaster/speed_scaling":
+                world.scale_cb = cb
+                return
             assert topic == "/joint_states"
             world.callback = cb
 
@@ -125,6 +137,8 @@ def install_fake_ros(monkeypatch, world):
             m.name = list(reversed(kin.UR_JOINTS))          # the driver's own order
             m.position = [float(world.twin.q[kin.UR_JOINTS.index(n)]) for n in m.name]
             world.callback(m)
+            if world.reports_scale and world.scale_cb is not None:
+                world.scale_cb(Float64(100.0 * world.slider))     # percent, like the driver
 
         def shutdown(self):
             pass
@@ -194,3 +208,25 @@ def test_ctrl_c_sends_a_hold(monkeypatch, tmp_path, small_plan, capsys):
 
 def test_bad_slider_refused(monkeypatch, tmp_path, small_plan):
     assert run(monkeypatch, tmp_path, World(), small_plan, "--speed-slider", "150") == 2
+
+
+def test_follows_the_robots_scaling_not_the_typed_one(monkeypatch, tmp_path, small_plan, capsys):
+    # the first lab run: typed 30 %, robot at a lower scaling, controller restarting from the
+    # measured state. Now the clock follows the robot and the word is drawn.
+    w = World(slider=0.5, restart="measured")
+    assert run(monkeypatch, tmp_path, w, small_plan, "--speed-slider", "100") == 0
+    out = capsys.readouterr().out
+    assert "robot speed scaling: 50 %" in out and "following the robot" in out
+    assert all(ok for _, ok in w.sent)
+
+
+def test_no_scaling_topic_needs_the_slider(monkeypatch, tmp_path, small_plan, capsys):
+    w = World(reports_scale=False)
+    assert run(monkeypatch, tmp_path, w, small_plan) == 2
+    assert "no /speed_scaling" in capsys.readouterr().err and w.sent == []
+
+
+def test_paused_program_refused(monkeypatch, tmp_path, small_plan, capsys):
+    w = World(slider=0.0)
+    assert run(monkeypatch, tmp_path, w, small_plan, "--speed-slider", "30") == 2
+    assert "paused" in capsys.readouterr().err and w.sent == []

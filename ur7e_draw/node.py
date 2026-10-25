@@ -28,6 +28,38 @@ from .stream import CLAMP_RADIUS, RATE_HZ, START_TOL, STALE_S, TICK_S, Streamer
 
 
 DISCOVERY_S = 5.0    # s to wait for /joint_states and the validator at startup
+SCALING_TOPIC = "/speed_scaling_state_broadcaster/speed_scaling"   # Float64, percent
+
+
+def speed_report(scale: float | None, slider: float | None, c: dict, name: str,
+                 word: str) -> str | None:
+    """Print what the run will take at the robot's real speed; -> a refusal, or None."""
+    if scale is None:
+        if slider is None:
+            return (f"no {SCALING_TOPIC} from the UR driver and no --speed-slider: give the "
+                    "pendant's slider, e.g. ./run.sh draw 30")
+        print(f"warning: no {SCALING_TOPIC}; trusting --speed-slider {slider:.0f} %")
+        scale = slider / 100.0
+    else:
+        print(f"robot speed scaling: {100 * scale:.0f} % (live from the UR driver)")
+        if slider is not None and abs(100 * scale - slider) > 3:
+            print(f"note: you said {slider:.0f} %, the robot reports {100 * scale:.0f} %: "
+                  "following the robot (first lab run stopped because of exactly this)")
+    if scale < 0.02:
+        return ("robot speed scaling is ~0: the pendant program is paused or the slider is at "
+                "0; press play / raise the slider, then retry")
+    dur = c["seconds"] / scale
+    print(f"plan {name}: '{word}', {c['word_box_m']['width']:.2f} x "
+          f"{c['word_box_m']['height']:.2f} m around the tuck flange, {dur:.0f} s at "
+          f"{100 * scale:.0f} %; every joint within "
+          f"{max(c['max_dev_from_tuck_rad'].values()):.2f} rad of tuck")
+    if dur > 60:
+        print(f"note: over a minute at this speed; slider >= "
+              f"{np.ceil(c['seconds'] * 100 / 60):.0f} % gets it under 60 s")
+    if scale > 0.5:
+        print("note: above 50 % the letters may smear or the tracking guard may stop the run "
+              "(twin); 30-50 % is the tested range")
+    return None
 
 
 def check_plan(plan: dict) -> str | None:
@@ -53,13 +85,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python3 -m ur7e_draw.node", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--plan", type=Path, default=ROOT / "plans" / "future.json")
-    ap.add_argument("--speed-slider", type=float, required=True,
-                    help="the teach pendant's speed slider in %% (read it off the pendant)")
+    ap.add_argument("--speed-slider", type=float, default=None,
+                    help="the pendant's speed slider in %%: only a cross-check; the robot's own "
+                         "speed scaling (" + SCALING_TOPIC + ") is what the clock follows")
     ap.add_argument("--out", type=Path, default=ROOT / "runs")
     ap.add_argument("--trial", default=None, help="log name (default: time stamp)")
     ap.add_argument("--dry-run", action="store_true", help="all checks, never publish")
     a = ap.parse_args(argv)
-    if not 5 <= a.speed_slider <= 100:
+    if a.speed_slider is not None and not 5 <= a.speed_slider <= 100:
         print("--speed-slider must be 5..100 (%)", file=sys.stderr)
         return 2
     plan = load(a.plan)
@@ -75,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     from rclpy.qos import HistoryPolicy, QoSProfile
     from rclpy.signals import SignalHandlerOptions
     from sensor_msgs.msg import JointState
+    from std_msgs.msg import Float64
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
     trial = a.trial or time.strftime("draw_%Y%m%d_%H%M%S")
@@ -92,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     ex.add_node(node)
     pub = node.create_publisher(JointTrajectory, "/joint_trajectory_validated", 10)
     latest: dict[str, Any] = {}
-    st = Streamer(plan, a.speed_slider / 100.0)
+    st = Streamer(plan, (a.speed_slider or 0.0) / 100.0)
 
     def on_js(msg: JointState) -> None:
         by = dict(zip(msg.name, msg.position))
@@ -104,6 +138,15 @@ def main(argv: list[str] | None = None) -> int:
             st.on_state(latest["t"], q)
 
     # keep only the newest reading: a backed-up queue would serve old readings as fresh
+    def on_scale(msg: Float64) -> None:
+        v = float(msg.data)
+        if np.isfinite(v):
+            latest["scale"] = v / 100.0              # the broadcaster publishes percent
+            latest["t_scale"] = time.monotonic()
+            st.set_scale(latest["scale"])
+
+    node.create_subscription(Float64, SCALING_TOPIC, on_scale,
+                             QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1))
     node.create_subscription(JointState, "/joint_states", on_js,
                              QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=1))
 
@@ -131,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         # DDS discovery on the lab network can take seconds: wait for the first reading and
         # for the validator's subscription before judging either missing
         end = time.monotonic() + DISCOVERY_S
-        while time.monotonic() < end and ("q" not in latest or
+        while time.monotonic() < end and ("q" not in latest or "scale" not in latest or
                                           pub.get_subscription_count() == 0):
             spin_for(0.1)
         spin_for(0.2)
@@ -149,20 +192,15 @@ def main(argv: list[str] | None = None) -> int:
                   "(ros2 run joint_control validate_trajectory)", file=sys.stderr)
             if not a.dry_run:
                 return 2
-        c = plan["checks"]
-        dur = c["seconds"] * 100 / a.speed_slider
-        print(f"plan {a.plan.name}: '{plan['word']}', {c['word_box_m']['width']:.2f} x "
-              f"{c['word_box_m']['height']:.2f} m around the tuck flange, "
-              f"{dur:.0f} s at {a.speed_slider:.0f} % slider; "
-              f"every joint within {max(c['max_dev_from_tuck_rad'].values()):.2f} rad of tuck")
-        if dur > 60:
-            print(f"note: over a minute at this slider; >= "
-                  f"{np.ceil(c['seconds'] * 100 / 60):.0f} % gets it under 60 s")
-        if a.speed_slider > 50:
-            print("note: above 50 % the letters may smear or the tracking guard may stop the "
-                  "run (twin); 30-50 % is the tested range")
+        bad = speed_report(latest.get("scale"), a.speed_slider, plan["checks"], a.plan.name,
+                           plan["word"])
+        if bad:
+            print(bad, file=sys.stderr)
+            return 2
         log.write(json.dumps({"event": "header", "trial": trial, "plan": str(a.plan),
                               "params": plan["params"], "speed_slider_pct": a.speed_slider,
+                              "robot_speed_scaling_pct": None if "scale" not in latest
+                              else round(100 * latest["scale"], 1),
                               "rate_hz": RATE_HZ, "horizon_s": st.horizon_s,
                               "dry_run": a.dry_run, "q0": latest["q"].tolist(),
                               "wall": time.time()}) + "\n")
