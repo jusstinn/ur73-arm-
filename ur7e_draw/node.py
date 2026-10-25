@@ -28,6 +28,7 @@ from .stream import CLAMP_RADIUS, RATE_HZ, START_TOL, STALE_S, TICK_S, Streamer
 
 
 DISCOVERY_S = 5.0    # s to wait for /joint_states and the validator at startup
+GRIPPER_SERVICE = "/toggle_gripper"
 SCALING_TOPIC = "/speed_scaling_state_broadcaster/speed_scaling"   # Float64, percent
 
 
@@ -91,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "runs")
     ap.add_argument("--trial", default=None, help="log name (default: time stamp)")
     ap.add_argument("--dry-run", action="store_true", help="all checks, never publish")
+    ap.add_argument("--no-gripper", action="store_true",
+                    help="ignore the plan's gripper toggles (hello: open/close while waving)")
     ap.add_argument("--countdown", type=float, default=0.0,
                     help="start after this many seconds of countdown instead of waiting for "
                          "Enter (3..30; Ctrl-C during it aborts before anything moves)")
@@ -132,6 +135,17 @@ def main(argv: list[str] | None = None) -> int:
     ex = SingleThreadedExecutor()
     ex.add_node(node)
     pub = node.create_publisher(JointTrajectory, "/joint_trajectory_validated", 10)
+    # the plan may ask for the lab's gripper toggle (std_srvs/Trigger /toggle_gripper, lab 5) at
+    # given plan times; the validator never sees it, and without the service the run goes on
+    toggles = [] if a.no_gripper else [float(t) for t in plan.get("gripper_toggles_s", [])]
+    grip = {"cli": None, "Req": None, "sent": 0}
+    if toggles:
+        try:
+            from std_srvs.srv import Trigger
+            grip["cli"], grip["Req"] = node.create_client(Trigger, GRIPPER_SERVICE), Trigger
+        except ImportError:
+            print("std_srvs missing: waving without the gripper")
+            toggles = []
     latest: dict[str, Any] = {}
     st = Streamer(plan, (a.speed_slider or 0.0) / 100.0)
 
@@ -185,6 +199,10 @@ def main(argv: list[str] | None = None) -> int:
                                           pub.get_subscription_count() == 0):
             spin_for(0.1)
         spin_for(0.2)
+        if toggles and not grip["cli"].service_is_ready():
+            print(f"no {GRIPPER_SERVICE} service: moving without the gripper (start the lab's "
+                  "gripper node to include it)")
+            toggles = []
         if "q" not in latest:
             print(f"no /joint_states with the six UR joints in {DISCOVERY_S:.0f} s: is "
                   "`./run.sh comms` (ros2 run ur7e_utils enable_comms) still running? check "
@@ -251,13 +269,25 @@ def main(argv: list[str] | None = None) -> int:
             log.write(json.dumps(rec) + "\n")
             if rec["event"] == "stop":
                 break
+            if grip["sent"] < len(toggles) and st.tau >= toggles[grip["sent"]]:
+                grip["cli"].call_async(grip["Req"].Request())     # never waits on the gripper
+                grip["sent"] += 1
+                log.write(json.dumps({"event": "gripper_toggle", "n": grip["sent"],
+                                      "tau": round(st.tau, 3), "t_rel": round(now - t0, 4)})
+                          + "\n")
         print(f"result: {st.status}")
         if st.status != "done":
             print("stopped early: the arm holds where it is; ./run.sh tuck brings it back")
+        if grip["sent"] % 2:
+            print(f"the gripper was toggled {grip['sent']} times: it is in the opposite state "
+                  "now; ./run.sh gripper toggles it back")
         log.write(json.dumps({"event": "result", "trial": trial, "status": st.status}) + "\n")
         print(f"log: {log_path}\ndrawn path: python3 -m ur7e_draw.trace {log_path}")
         return 0 if st.status == "done" else 1
     except KeyboardInterrupt:
+        if grip["sent"] % 2:
+            print(f"\nthe gripper was toggled {grip['sent']} times (opposite state now; "
+                  "./run.sh gripper toggles it back)")
         fresh = latest.get("q") is not None and time.monotonic() - latest["t"] <= STALE_S
         try:
             if fresh:

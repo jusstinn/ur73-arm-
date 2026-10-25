@@ -65,6 +65,20 @@ def install_fake_ros(monkeypatch, world):
     sm = mod("sensor_msgs.msg")
     mod("std_msgs")
     stdm = mod("std_msgs.msg")
+    mod("std_srvs")
+    srvm = mod("std_srvs.srv")
+
+    class Trigger:
+        class Request:
+            pass
+    srvm.Trigger = Trigger
+
+    class GripperClient:
+        def service_is_ready(self):
+            return getattr(world, "gripper_service", True)
+
+        def call_async(self, req):
+            world.toggles = getattr(world, "toggles", []) + [time.monotonic()]
 
     class Float64:
         def __init__(self, data=0.0):
@@ -114,6 +128,10 @@ def install_fake_ros(monkeypatch, world):
 
         def create_publisher(self, *a):
             return Pub()
+
+        def create_client(self, typ, name):
+            assert name == "/toggle_gripper"
+            return GripperClient()
 
         def create_subscription(self, typ, topic, cb, qos):
             if topic == "/speed_scaling_state_broadcaster/speed_scaling":
@@ -274,3 +292,27 @@ def test_countdown_bounds(monkeypatch, tmp_path):
     install_fake_ros(monkeypatch, World())
     from ur7e_draw import node
     assert node.main(["--plan", "plans/hello.json", "--countdown", "1"]) == 2
+
+
+def test_hello_toggles_the_gripper_an_even_number_of_times_while_waving(monkeypatch, tmp_path):
+    from ur7e_draw import hello
+    p = tmp_path / "hello.json"
+    plan = hello.build(waves=1)
+    p.write_text(json.dumps(plan))
+    w = World()
+    assert run(monkeypatch, tmp_path, w, p) == 0
+    assert len(w.toggles) == hello.GRIPPER_TOGGLES and hello.GRIPPER_TOGGLES % 2 == 0
+    recs = [json.loads(x) for x in (tmp_path / "t.jsonl").read_text().splitlines()]
+    taus = [r["tau"] for r in recs if r.get("event") == "gripper_toggle"]
+    t0 = len(np.arange(0, 1.5 * 0.36 / hello.SPEED, 0.01)) / 100       # end of the raise
+    assert all(t > t0 for t in taus)                                    # only while waving
+
+
+def test_hello_without_gripper_service_still_waves(monkeypatch, tmp_path, capsys):
+    from ur7e_draw import hello
+    p = tmp_path / "hello.json"
+    p.write_text(json.dumps(hello.build(waves=1)))
+    w = World()
+    w.gripper_service = False
+    assert run(monkeypatch, tmp_path, w, p) == 0
+    assert not getattr(w, "toggles", []) and "without the gripper" in capsys.readouterr().out

@@ -1,11 +1,16 @@
-"""The UR7e says hello: raises its tool, waves its hand up and down, comes back to tuck.
+"""The UR7e says hello: raises its hand, waves it left and right while opening and closing the
+gripper, comes back to tuck.
 
     python3 -m ur7e_draw.hello                 # writes plans/hello.json and prints its checks
 
 The greeting from the Loop website, inside the course validator's band: every joint stays
 within PLAN_RADIUS (0.40 rad) of tuck, so the "raise" is shoulder_lift + elbow + wrist_1 tilted
-toward the band's edge (the flange goes ~0.3 m up, measured below), and the wave is wrist_1
-flapping the hand up and down with a little elbow in phase. Same plan format as
+toward the band's edge (the flange goes ~0.4 m up, measured below), and the wave is the base
+(shoulder_pan) and wrist_2 swinging in phase: at the raised pose both move the fingertips
+sideways (0.54 and 0.24 m per rad), so the hand sweeps left and right. During the sweep the
+plan asks for GRIPPER_TOGGLES calls to the lab's /toggle_gripper service (an even number, so the
+gripper ends as it started); the node makes them when its plan clock passes each time. Same
+plan format as
 plans/future.json, so `ur7e_draw.node` plays it with all of its guards (live speed scaling,
 tracking, envelope, stale readings, Ctrl-C hold) and `ur7e_draw.stream` checks it on the twin.
 
@@ -28,11 +33,13 @@ from .plan import (CLEARANCE_M, GRIPPER_M, JOINT_SPEED_MAX, PLAN_HZ, PLAN_RADIUS
 J = {n: i for i, n in enumerate(UR_JOINTS)}
 #: the raised pose, offsets from tuck (rad): the highest tool pose that leaves room for the wave
 RAISE = {"shoulder_lift_joint": 0.36, "elbow_joint": 0.30, "wrist_1_joint": 0.10}
-FLAP = {"wrist_1_joint": 0.20, "elbow_joint": 0.04}       # the wave's amplitude per joint, rad
+#: the side-to-side wave's amplitude per joint, rad (in phase: both sweep the hand sideways)
+SWAY = {"shoulder_pan_joint": 0.12, "wrist_2_joint": 0.30}
+GRIPPER_TOGGLES = 4            # open/close calls during the sweep (even: ends as it started)
 SPEED = 0.5                    # rad/s: the raise and the lower (the arm-carrying joints)
 #: rad/s, the flapping wrist's peak (plan limit 0.8); 0.75 tripped a twin variant at 50 %
 WAVE_SPEED = 0.6
-WAVES = 4                      # flaps
+WAVES = 3                      # left-right-left sweeps
 
 
 def smooth01(x: np.ndarray) -> np.ndarray:
@@ -45,11 +52,13 @@ def build(speed: float = SPEED, waves: int = WAVES, wave_speed: float = WAVE_SPE
     for n, v in RAISE.items():
         raised[J[n]] += v
     amp = np.zeros(6)
-    for n, v in FLAP.items():
+    for n, v in SWAY.items():
         amp[J[n]] = v
     # a smoothstep peaks at 1.5 x its mean speed; a sine at 2 pi f A
     move_s = 1.5 * float(np.max(np.abs(raised - TUCK))) / speed
-    hz = wave_speed / (2 * math.pi * float(amp.max()))
+    # each joint under its own bound: the base carries the arm (SPEED), the wrist is light
+    lim = np.where(np.arange(6) == J["shoulder_pan_joint"], speed, wave_speed)
+    hz = float(np.min(lim[amp > 0] / (2 * math.pi * amp[amp > 0])))
     wave_s = waves / hz
     up = np.arange(0.0, move_s, 1 / PLAN_HZ)
     wv = np.arange(0.0, wave_s, 1 / PLAN_HZ)
@@ -59,6 +68,9 @@ def build(speed: float = SPEED, waves: int = WAVES, wave_speed: float = WAVE_SPE
     q_wave = raised + (np.sin(2 * math.pi * hz * wv) * fade)[:, None] * amp
     q_down = raised + smooth01(up / move_s)[:, None] * (TUCK - raised)
     Q = np.vstack([q_up, q_wave, q_down, TUCK[None, :]])
+    t_wave0 = len(q_up) / PLAN_HZ
+    toggles = [round(t_wave0 + wave_s * (k + 1) / (GRIPPER_TOGGLES + 1), 3)
+               for k in range(GRIPPER_TOGGLES)]
     pen = np.r_[np.zeros(len(q_up)), np.ones(len(q_wave)), np.zeros(len(q_down) + 1)]
     tip = np.array([fk(q)[0] for q in Q])
     fingers = np.array([fk(q, GRIPPER_M)[0] for q in Q[::5]])
@@ -76,6 +88,7 @@ def build(speed: float = SPEED, waves: int = WAVES, wave_speed: float = WAVE_SPE
         problems.append("does not start and end exactly at tuck")
     if problems:
         raise ValueError("plan refused: " + "; ".join(problems))
+    fing_all = np.array([fk(q, GRIPPER_M)[0] for q in q_wave])
     horiz = np.linalg.norm(tip[:, :2] - tip[0, :2], axis=1)
     checks = {
         "seconds": round(len(Q) / PLAN_HZ, 2),
@@ -86,14 +99,16 @@ def build(speed: float = SPEED, waves: int = WAVES, wave_speed: float = WAVE_SPE
         "word_box_m": {"width": round(float(np.ptp(horiz)), 3),
                        "height": round(float(np.ptp(tip[:, 2])), 3)},
         "flange_rise_m": round(float(tip[:, 2].max() - tip[0, 2]), 3),
+        "fingertip_sweep_m": round(float(np.ptp(fing_all[:, 0])), 3),
         "flange_z_min_m": round(float(tip[:, 2].min()), 3),
         "fingertip_z_min_m": round(finger_z, 3),
         "fingertip_above_table_m": round(finger_z - TABLE_Z_M, 3),
         "tuck_flange_m": tip[0].round(4).tolist(),
     }
     return {"word": "hello (wave)", "hz": PLAN_HZ, "joint_order": list(UR_JOINTS),
+            "gripper_toggles_s": toggles,
             "frame": "UR base (DH) frame, m; tip = flange (tool0)",
-            "params": {"raise": RAISE, "flap": FLAP, "speed": speed, "wave_speed": wave_speed,
+            "params": {"raise": RAISE, "sway": SWAY, "speed": speed, "wave_speed": wave_speed,
                        "waves": waves,
                        "mirror": False, "gripper": GRIPPER_M},
             "checks": checks, "q": Q.round(6).tolist(), "tip": tip.round(5).tolist(),

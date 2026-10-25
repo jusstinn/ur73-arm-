@@ -174,6 +174,8 @@ def test_hello_plan_limits_and_twin():
     assert np.allclose(Q[0], kin.TUCK) and np.allclose(Q[-1], kin.TUCK)
     assert max(pl["checks"]["max_joint_speed_rad_s"].values()) <= P.JOINT_SPEED_MAX + 1e-6
     assert pl["checks"]["flange_rise_m"] > 0.3                      # it really raises
+    assert pl["checks"]["fingertip_sweep_m"] > 0.2                  # and sweeps left-right
+    assert len(pl["gripper_toggles_s"]) % 2 == 0
     assert pl["checks"]["fingertip_above_table_m"] >= P.CLEARANCE_M
     for s in (0.3, 0.5):
         res = S.twin_grid(P.arrays(pl), s)

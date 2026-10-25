@@ -64,16 +64,22 @@ With terminals A (comms) and B (validator) running and the arm at tuck (`./run.s
 
 ```bash
 ./run.sh alias      # once per computer: afterwards the word `run` does the line below
-run                 # = ./run.sh hello: 5 s countdown, then the arm raises its hand and waves
+run                 # = ./run.sh hello: 5 s countdown, then the hello
 ```
 
-The arm lifts its tool ~0.4 m inside the validator's band (every joint within 0.40 rad of
-tuck), flaps the hand up and down 4 times (~0.5 Hz at 100 %, slower at lower sliders) and
-returns to tuck: ~10.5 s at 100 %, ~21 s at 50 %. Tested in the twin at 30 and 50 % slider
-(every controller variant finishes); at 70-100 % slower-servo variants trip the tracking guard,
-which stops and holds the arm, so keep the slider at 30-50 % until a real run says otherwise.
-Ctrl-C during the countdown aborts before anything moves; Ctrl-C later holds where it is.
-`./run.sh hello 10` gives a 10 s countdown. Logs go to `runs/hello_<time>.jsonl`.
+The arm raises its hand (~0.36 m up, every joint within 0.40 rad of tuck), then waves it left
+and right three times (the base and wrist_2 swing together, the fingertips sweep ~27 cm) while
+the gripper opens and closes four times, then returns to tuck: ~11.6 s at 100 %, ~23 s at 50 %.
+The gripper uses the lab's `/toggle_gripper` service (lab 5); if that service isn't running the
+arm waves without the gripper and says so. An even number of toggles leaves the gripper as it
+started; if a run stops early after an odd number, `./run.sh gripper` toggles it back.
+
+Tested in the twin at 30 and 50 % slider (every controller variant finishes); at 70-100 % a
+slower-servo variant trips the tracking guard, which stops and holds the arm, so keep the slider
+at 30-50 % until a real run says otherwise. Ctrl-C during the countdown aborts before anything
+moves; Ctrl-C later holds where it is. `./run.sh hello 10` gives a 10 s countdown;
+`./run.sh hello 5 --no-gripper` waves without the gripper. Logs: `runs/hello_<time>.jsonl`.
+Preview (arm only, the gripper is not animated): `media/hello_preview.mp4`.
 
 ### Where to stand or film
 

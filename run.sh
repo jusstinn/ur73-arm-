@@ -10,6 +10,7 @@
 #   ./run.sh draw [slider%]   terminal C: DRAWS ON THE ARM (Enter to start, Ctrl-C = hold)
 #   ./run.sh hello [secs]     terminal C: WAVES HELLO (countdown, default 5 s, then moves; Ctrl-C = hold)
 #   ./run.sh alias            once: makes the word `run` mean ./run.sh hello (new terminals)
+#   ./run.sh gripper          toggles the gripper once (ros2 service call /toggle_gripper)
 #   ./run.sh trace [log]      the drawn path of the last run (or of <log>) -> .drawn.svg/.json
 #   ./run.sh plan [args]      re-plan (e.g. --mirror, --scale 0.06); see python3 -m ur7e_draw.plan -h
 set -euo pipefail
@@ -90,6 +91,10 @@ case "$cmd" in
     python3 -m ur7e_draw.node --plan plans/hello.json --countdown "${1:-5}" \
       --trial "hello_$(date +%Y%m%d_%H%M%S)" "${@:2}"
     ;;
+  gripper)
+    ros_env
+    exec ros2 service call /toggle_gripper std_srvs/srv/Trigger
+    ;;
   alias)
     line="alias run='$(pwd)/run.sh hello'"
     if grep -qxF "$line" ~/.bashrc 2>/dev/null; then
@@ -116,6 +121,6 @@ case "$cmd" in
     python3 -m ur7e_draw.plan "$@"
     ;;
   *)
-    sed -n '2,14p' "$0"
+    sed -n '2,15p' "$0"
     ;;
 esac
