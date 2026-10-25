@@ -1,0 +1,44 @@
+{
+ "band_rad": 0.4,
+ "gripper_m": 0.14,
+ "reachable_any_orientation_from_tuck_fingertip_m": {
+  "x": {
+   "min": -0.381,
+   "max": 0.402
+  },
+  "y": {
+   "min": -0.248,
+   "max": 0.355
+  },
+  "z": {
+   "min": -0.363,
+   "max": 0.545
+  }
+ },
+ "reachable_span_m": {
+  "x": 0.783,
+  "y": 0.603,
+  "z": 0.908
+ },
+ "largest_cube_gripper_down": {
+  "side_m": 0.141,
+  "center_m": [
+   -0.0401,
+   -0.5737,
+   0.327
+  ],
+  "center_from_tuck_fingertip_m": [
+   0.08,
+   0.04,
+   0.04
+  ],
+  "tuck_fingertip_m": [
+   -0.1201,
+   -0.6137,
+   0.287
+  ]
+ },
+ "test_cube_side_m": 0.141,
+ "test_plan": "/Users/justinstoica/ur73-arm/plans/limits.json",
+ "test_plan_seconds_at_100": 40.15
+}

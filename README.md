@@ -87,6 +87,34 @@ moves; Ctrl-C later holds where it is. `./run.sh hello 10` gives a 10 s countdow
 `./run.sh hello 5 --no-gripper` waves without the gripper. Logs: `runs/hello_<time>.jsonl`.
 Preview (arm only, the gripper is not animated): `media/hello_preview.mp4`.
 
+### How big is the arm's box? (limits test)
+
+The course validator only accepts targets with every joint within 0.5 rad of tuck, so the arm
+works in a small region around tuck. `python3 -m ur7e_draw.limits` (no ROS) computes it from the
+UR7e's geometry (plans stay within 0.40 rad; fingertips 0.14 m past the flange; base
+frame, m):
+
+- **Anywhere the fingertips can reach** (any tool orientation): from the tuck fingertip
+  x -0.38 .. +0.40, y -0.25 .. +0.35,
+  z -0.36 .. +0.55 (spans 0.78 x
+  0.60 x 0.91 m).
+- **The largest cube with the gripper held pointing down (as at tuck): 14.1 cm per side**,
+  centred [0.08, 0.04, 0.04] m from the tuck
+  fingertip. That is the box a level-gripper task (pick and place, drawing) has to fit in.
+
+The test on the arm traces that cube's 12 edges at 10 cm/s with a short stop at each corner
+(~40 s at 100 %, ~80 s at 50 %), through the same node and guards:
+
+```bash
+./run.sh tuck
+./run.sh limits          # Enter starts; ./run.sh limits 0.8 traces 80 % of the cube first
+./run.sh limits-check    # where the fingertips actually went vs the planned cube, per corner
+```
+
+If a corner is out of the real arm's reach the tracking guard stops there and holds; the check
+then says which corners were reached. Twin: every controller variant finishes at 30/50/100 %.
+Preview: `media/limits_preview.mp4`; numbers: `media/limits.json`.
+
 ### Where to stand or film
 
 The word reads correctly from in front of the tool, looking back at the robot (the side the

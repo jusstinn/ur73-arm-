@@ -183,3 +183,21 @@ def test_hello_plan_limits_and_twin():
         res = S.twin_grid(P.arrays(pl), s)
         assert all(r["status"] == "done" for r in res.values()), {k: r["status"]
                                                                   for k, r in res.items()}
+
+
+def test_limits_cube_plan():
+    from ur7e_draw import limits as L
+    cube = {"center": np.array(L.fk(kin.TUCK, P.GRIPPER_M)[0]) + np.array([0.08, 0.04, 0.04])}
+    pl = L.build_plan(cube["center"], 0.10)
+    Q = np.array(pl["q"])
+    assert np.max(np.abs(Q - kin.TUCK)) <= P.PLAN_RADIUS + 1e-9
+    assert np.allclose(Q[0], kin.TUCK) and np.allclose(Q[-1], kin.TUCK)
+    assert np.all(np.array(list(pl["checks"]["max_joint_speed_rad_s"].values()))
+                  <= P.SPEED_MAX + 1e-6)
+    fing = np.array([L.fk(q, P.GRIPPER_M)[0] for q in Q])
+    for k in L.CORNERS:                                    # every corner is visited
+        corner = cube["center"] + 0.05 * k
+        assert np.min(np.linalg.norm(fing - corner, axis=1)) < 1e-3
+    for s in (0.3, 1.0):
+        assert all(r["status"] == "done" for r in S.twin_grid(P.arrays(pl), s).values())
+    assert not L.cube_ok(cube["center"], 0.2, L.fk(kin.TUCK, P.GRIPPER_M)[1], P.PLAN_RADIUS)

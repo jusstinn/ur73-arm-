@@ -11,6 +11,8 @@
 #   ./run.sh hello [secs]     terminal C: WAVES HELLO (countdown, default 5 s, then moves; Ctrl-C = hold)
 #   ./run.sh alias            once: makes the word `run` mean ./run.sh hello (new terminals)
 #   ./run.sh gripper          toggles the gripper once (ros2 service call /toggle_gripper)
+#   ./run.sh limits [frac]    terminal C: TRACES THE LARGEST CUBE the arm can reach (Enter starts)
+#   ./run.sh limits-check     what the last limits run actually reached
 #   ./run.sh trace [log]      the drawn path of the last run (or of <log>) -> .drawn.svg/.json
 #   ./run.sh plan [args]      re-plan (e.g. --mirror, --scale 0.06); see python3 -m ur7e_draw.plan -h
 set -euo pipefail
@@ -91,6 +93,19 @@ case "$cmd" in
     python3 -m ur7e_draw.node --plan plans/hello.json --countdown "${1:-5}" \
       --trial "hello_$(date +%Y%m%d_%H%M%S)" "${@:2}"
     ;;
+  limits)
+    ros_env; need_numpy
+    frac="${1:-1.0}"
+    python3 -m ur7e_draw.limits --fraction "$frac" >/dev/null
+    python3 -m ur7e_draw.node --plan plans/limits.json \
+      --trial "limits_$(date +%Y%m%d_%H%M%S)" "${@:2}"
+    ;;
+  limits-check)
+    need_numpy
+    log="$(ls -t runs/limits_*.jsonl 2>/dev/null | head -1 || true)"
+    [ -n "$log" ] || { echo "no limits runs in runs/ yet" >&2; exit 2; }
+    python3 -m ur7e_draw.limits --check "$log"
+    ;;
   gripper)
     ros_env
     exec ros2 service call /toggle_gripper std_srvs/srv/Trigger
@@ -121,6 +136,6 @@ case "$cmd" in
     python3 -m ur7e_draw.plan "$@"
     ;;
   *)
-    sed -n '2,15p' "$0"
+    sed -n '2,17p' "$0"
     ;;
 esac

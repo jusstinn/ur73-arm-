@@ -337,3 +337,14 @@ def test_slow_gripper_delays_toggles_but_keeps_the_count_even(monkeypatch, tmp_p
     assert len(w.toggles) == n and n % 2 == 0
     gaps = np.diff(w.toggles)
     assert np.all(gaps >= 0.95)                  # never sent while the previous was busy
+
+
+def test_limits_run_and_check(monkeypatch, tmp_path):
+    from ur7e_draw import limits as L
+    c = np.array(L.fk(kin.TUCK, P.GRIPPER_M)[0]) + np.array([0.02, 0.0, 0.02])
+    p = tmp_path / "limits.json"
+    p.write_text(json.dumps(L.build_plan(c, 0.03)))
+    w = World()
+    assert run(monkeypatch, tmp_path, w, p) == 0
+    rep = L.check_run(tmp_path / "t.jsonl", p)
+    assert rep["status"] == "done" and rep["corners_reached_within_10mm"] == 8
