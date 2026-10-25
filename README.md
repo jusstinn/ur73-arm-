@@ -1,0 +1,109 @@
+# UR7e writes "future" in the air
+
+The lab UR7e writes a cursive **future** with its flange, about 33 × 15 cm, in the air in front
+of its tuck pose. Every command goes through the course's `validate_trajectory` node.
+
+![preview](media/future_preview.png)
+
+`media/future_preview.mp4` shows the same plan in sim, seen from where the word reads correctly.
+
+## At the lab
+
+First time:
+
+```bash
+git clone https://github.com/jusstinn/ur73-arm-.git ~/ur73-arm
+```
+
+After that:
+
+```bash
+cd ~/ur73-arm && git pull
+```
+
+Then:
+
+1. Enter the ROS environment (`distrobox enter ros2`). Bring the UR driver up the way the lab
+   does, and start the External Control program on the pendant.
+2. Put the arm in **tuck** the lab's way. The script refuses to start more than 0.05 rad
+   from tuck on any joint.
+3. Set the pendant's **speed slider to 30 %** for the first run and read the number off the
+   pendant.
+4. Clear a box about 45 cm wide, 25 cm tall and 10 cm deep around the tool, plus the arm's
+   space between there and the base.
+5. Terminal A, left running:
+   ```bash
+   ./run.sh validator
+   ```
+6. Terminal B:
+   ```bash
+   ./run.sh check        # no ROS: plan + controller-twin check (should print "all variants finish")
+   ./run.sh dry 30       # ROS checks only: joint states, at tuck, validator listening; moves nothing
+   ./run.sh draw 30      # hand on the e-stop, Enter starts. Takes ~2 min at 30 %, ~40 s at 100 %
+   ./run.sh trace        # the path the arm actually drew -> runs/<name>.drawn.svg / .drawn.json
+   ```
+7. To bring the data home:
+   ```bash
+   git add runs && git commit -m "UR7e draw run" && git push
+   ```
+
+The number after `dry` and `draw` is the speed slider's %. If it's wrong, nothing unsafe
+happens: too high and the tracking guard stops the run; too low and the arm just waits for
+each goal. Ctrl-C at any time sends a hold at the current position.
+
+### Where to stand or film
+
+The word reads correctly from in front of the tool, looking back at the robot (the side the
+arm reaches toward at tuck). To film from behind the arm instead:
+
+```bash
+./run.sh plan --mirror
+```
+
+Then `./run.sh check` and run as above. The planner refuses any plan that leaves the safe band.
+
+## What it does
+
+- **`ur7e_draw/plan.py`**: the letters (`letters.py`, one cursive stroke plus the f and t
+  crossbars) go on the vertical plane through the tuck flange position. IK (UR DH,
+  damped least squares) runs at 100 Hz with the tool held at its tuck orientation. The flange
+  moves at 8 cm/s, comes to rest at sharp corners, and pulls back 3 cm toward the base
+  between strokes. The plan starts and ends exactly at tuck. Checks: every joint within
+  0.40 rad of tuck (max used: 0.28), joint speed ≤ 0.6 rad/s (max used: 0.25), IK error
+  < 0.01 mm. The result is `plans/future.json`.
+- **`ur7e_draw/stream.py`**: the validator only takes one point, zero velocities, the
+  validator's joint order, and every joint within 0.5 rad of tuck. So the plan streams at
+  25 Hz as one single-point trajectory per tick, each lasting one tick and aiming one tick
+  ahead (timing scaled by the speed slider). Guards: stale `/joint_states` (0.2 s) → stop;
+  any joint more than 0.48 rad from tuck → stop and hold; arm more than 0.10 rad off the plan
+  → stop and hold. Goals are clamped to tuck ± 0.45 rad and to 0.032 rad per tick from the
+  measured position.
+- **Controller twin** (`JTCTwin`, a kinematic model of the scaled JTC): tested with both
+  restart behaviours × 4 servo lags × slider 100/50/30/10 % × ±15 ms timing jitter. Every
+  case finishes, and the letters stay within 4 mm of the plan.
+- **`ur7e_draw/node.py`**: the ROS 2 shell. It reads `/joint_states` (any joint order) and
+  publishes ONLY to `/joint_trajectory_validated`. Logs every tick to `runs/<name>.jsonl`.
+- **`ur7e_draw/trace.py`**: turns the log into the measured flange path. You get an SVG in
+  stroke order (for a stroke-dashoffset reveal) and a JSON with t, joints, xyz, word-plane
+  u/v and the pen flag, for animating.
+- **`ur7e_draw/preview.py`** (dev machine only): renders a plan or a drawn run in MuJoCo.
+
+Needs only `python3` + `numpy` at the lab (ROS 2 Humble supplies rclpy and the messages).
+Dev: `pytest` (20 tests, including the node end-to-end against fake ROS), plus `mujoco` and
+`imageio[ffmpeg]` for previews.
+
+## Status / caveats
+
+- **Not yet run on the real arm.** Tested against the twin and fake ROS only.
+- Get the TA's OK before streaming from a student node, and do the first run at 30 %.
+- The validator is unchanged and stays in the loop. Nothing here publishes to the controller
+  directly.
+- Kinematics: UR's own `ur7e/default_kinematics.yaml` is identical to the UR5e's, and the DH
+  model here matches MuJoCo Menagerie's UR5e to ~1 mm.
+
+## Sim showcase (big word, for video)
+
+`python3 -m ur7e_draw.showcase` (dev machine, MuJoCo) renders a larger 62 × 28 cm "future"
+with a glowing trail, from the front and at 45°, in dark and light styles. It also writes
+per-frame joints and tip positions for animation. It's posed far from tuck, so it's for video
+only and never runs on the arm.

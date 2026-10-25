@@ -1,0 +1,5 @@
+numpy
+# dev only:
+# pytest
+# mujoco
+# imageio[ffmpeg]
