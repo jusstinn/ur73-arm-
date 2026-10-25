@@ -74,7 +74,10 @@ def main(argv: list[str] | None = None) -> int:
         if a.log is None:
             ap.error("give a log, or --plan-only")
         rows = [json.loads(x) for x in a.log.read_text().splitlines() if x.strip()]
-        head = next(r for r in rows if r.get("event") == "header")
+        head = next((r for r in rows if r.get("event") == "header"), None)
+        if head is None:
+            print(f"{a.log} has no header: that run never started; nothing to trace")
+            return 2
         plan = load(a.plan or head["plan"])
         ticks = [r for r in rows if r.get("q") is not None and "tau" in r]
         t = np.array([r["t_rel"] for r in ticks])

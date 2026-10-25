@@ -2,9 +2,11 @@
 # One entry point for the lab computer. Run from anywhere; everything is relative to this repo.
 #
 #   ./run.sh check            no ROS: plan limits + controller-twin check at 30 and 50 % slider
-#   ./run.sh validator        terminal A: the course's validate_trajectory node (leave it running)
-#   ./run.sh dry  <slider%>   terminal B: ROS checks only (joint states, at tuck, validator up)
-#   ./run.sh draw <slider%>   terminal B: DRAWS ON THE ARM (Enter to start, Ctrl-C = hold)
+#   ./run.sh comms            terminal A: connect ROS to the arm (ur7e_utils enable_comms), leave running
+#   ./run.sh validator        terminal B: the course's validate_trajectory node, leave running
+#   ./run.sh tuck             terminal C: the lab's tuck (MOVES THE ARM to tuck)
+#   ./run.sh dry  <slider%>   terminal C: ROS checks only (joint states, at tuck, validator up)
+#   ./run.sh draw <slider%>   terminal C: DRAWS ON THE ARM (Enter to start, Ctrl-C = hold)
 #   ./run.sh trace [log]      the drawn path of the last run (or of <log>) -> .drawn.svg/.json
 #   ./run.sh plan [args]      re-plan (e.g. --mirror, --scale 0.06); see python3 -m ur7e_draw.plan -h
 set -euo pipefail
@@ -20,6 +22,19 @@ ros_env() {
     echo "no ROS 2 here: enter the lab's ROS environment first (distrobox enter ros2)" >&2
     exit 2
   fi
+}
+
+lab_ws() {
+  # the lab3 workspace (has joint_control; ur7e_utils comes with the lab setup)
+  for ws in ~/ros_workspaces/lab3 ~/ros_workspaces/*; do
+    if [ -f "$ws/install/setup.bash" ] && [ -d "$ws/src/joint_control" ]; then
+      set +u; source "$ws/install/setup.bash"; set -u
+      echo "using $ws"
+      return 0
+    fi
+  done
+  echo "no built lab3 workspace under ~/ros_workspaces: cd ~/ros_workspaces/lab3 && colcon build, then retry" >&2
+  exit 2
 }
 
 need_numpy() {
@@ -43,17 +58,17 @@ case "$cmd" in
       echo -n "slider $s %: "; python3 -m ur7e_draw.stream --speed-slider $s --jitter-ms 10 | tail -1
     done
     ;;
+  comms)
+    ros_env; lab_ws
+    exec ros2 run ur7e_utils enable_comms
+    ;;
   validator)
-    ros_env
-    for ws in ~/ros_workspaces/lab3 ~/ros_workspaces/lab4 ~/ros_workspaces/*; do
-      if [ -f "$ws/install/setup.bash" ] && [ -d "$ws/src/joint_control" ]; then
-        set +u; source "$ws/install/setup.bash"; set -u
-        echo "using $ws"
-        exec ros2 run joint_control validate_trajectory
-      fi
-    done
-    echo "no built workspace with joint_control found under ~/ros_workspaces: build lab3 (colcon build), then retry" >&2
-    exit 2
+    ros_env; lab_ws
+    exec ros2 run joint_control validate_trajectory
+    ;;
+  tuck)
+    ros_env; lab_ws
+    exec ros2 run ur7e_utils tuck
     ;;
   dry)
     slider "${1:-}"; ros_env; need_numpy
@@ -65,8 +80,13 @@ case "$cmd" in
     ;;
   trace)
     need_numpy
-    log="${1:-$(ls -t runs/*.jsonl 2>/dev/null | head -1)}"
-    [ -n "$log" ] || { echo "no run logs in runs/" >&2; exit 2; }
+    log="${1:-}"
+    if [ -z "$log" ]; then
+      for f in $(ls -t runs/*.jsonl 2>/dev/null || true); do
+        if grep -q '"event": "header"' "$f"; then log="$f"; break; fi
+      done
+    fi
+    [ -n "$log" ] || { echo "no run logs in runs/ yet (a run that never started leaves none)" >&2; exit 2; }
     python3 -m ur7e_draw.trace "$log"
     ;;
   plan)
@@ -74,6 +94,6 @@ case "$cmd" in
     python3 -m ur7e_draw.plan "$@"
     ;;
   *)
-    sed -n '2,10p' "$0"
+    sed -n '2,11p' "$0"
     ;;
 esac

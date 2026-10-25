@@ -22,30 +22,29 @@ After that:
 cd ~/ur73-arm && git pull
 ```
 
-Then:
+Every terminal below starts with `distrobox enter ros2`, then `cd ~/ur73-arm`. The pendant's
+External Control program must be running.
 
-1. Enter the ROS environment (`distrobox enter ros2`). Bring the UR driver up the way the lab
-   does, and start the External Control program on the pendant.
-2. Put the arm in **tuck** the lab's way. The script refuses to start more than 0.05 rad
-   from tuck on any joint.
-3. Set the pendant's **speed slider to 30 %** for the first run (56 s), then 50 % (34 s) if
-   you want it faster. Read the number off the pendant. 30-50 % is the tested range.
-4. Clear a box about 45 cm wide, 30 cm tall and 10 cm deep around the gripper, plus the
-   arm's space between there and the base. The tool keeps its tuck orientation (gripper
-   pointing down), so the fingertips trace the same word 14 cm below the flange. They stay
-   about 0.4 m above the table (the planner refuses less than 0.15 m).
-5. Terminal A, left running:
+1. **Terminal A**, connect ROS to the arm and leave it running (Lab 3 §1.1):
    ```bash
-   ./run.sh validator
+   ./run.sh comms        # = ros2 run ur7e_utils enable_comms, lab3 workspace sourced
    ```
-6. Terminal B:
+2. **Terminal B**, the course validator, left running:
    ```bash
-   ./run.sh check        # no ROS: plan + twin check (should print "all variants finish" twice)
-   ./run.sh dry 30       # ROS checks only: joint states, at tuck, validator listening; moves nothing
-   ./run.sh draw 30      # hand on the e-stop, Enter starts. 56 s at 30 %, 34 s at 50 %
-   ./run.sh trace        # the path the arm actually drew -> runs/<name>.drawn.svg / .drawn.json
+   ./run.sh validator    # = ros2 run joint_control validate_trajectory
    ```
-7. To bring the data home:
+3. Set the pendant's **speed slider to 30 %** (56 s run; 50 % = 34 s; tested range 30-50 %).
+   Clear about 45 cm wide, 30 cm tall and 10 cm deep around the gripper, plus the arm's space
+   between there and the base.
+4. **Terminal C**:
+   ```bash
+   ./run.sh check        # no ROS: should print "all variants finish" twice
+   ./run.sh tuck         # = ros2 run ur7e_utils tuck (moves the arm to tuck)
+   ./run.sh dry 30       # ROS checks only, moves nothing: "dry run OK ... validator listening"
+   ./run.sh draw 30      # hand on the e-stop, Enter starts; ~56 s, ends back at tuck
+   ./run.sh trace        # the path it actually drew -> runs/<name>.drawn.svg / .drawn.json
+   ```
+5. To bring the data home:
    ```bash
    git add runs && git commit -m "UR7e draw run" && git push
    ```

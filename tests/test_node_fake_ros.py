@@ -179,6 +179,7 @@ def test_refuses_away_from_tuck(monkeypatch, tmp_path, small_plan, capsys):
     w = World(q0=kin.TUCK + np.r_[0, 0, 0.1, 0, 0, 0])
     assert run(monkeypatch, tmp_path, w, small_plan, "--speed-slider", "100") == 2
     assert "not at tuck" in capsys.readouterr().err and w.sent == []
+    assert not (tmp_path / "t.jsonl").exists()               # a refused run leaves no log
 
 
 def test_ctrl_c_sends_a_hold(monkeypatch, tmp_path, small_plan, capsys):

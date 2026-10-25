@@ -42,7 +42,7 @@ def check_start(q: np.ndarray) -> str | None:
     d = np.abs(q - TUCK)
     if np.any(d > START_TOL):
         bad = ", ".join(f"{UR_JOINTS[j]} {d[j]:.3f}" for j in np.flatnonzero(d > START_TOL))
-        return f"not at tuck (rad off: {bad}); tuck the arm the lab's way first"
+        return f"not at tuck (rad off: {bad}); run ./run.sh tuck first"
     return None
 
 
@@ -127,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         spin_for(1.0)
         if "q" not in latest:
-            print("no /joint_states with the six UR joints: is the UR driver up?", file=sys.stderr)
+            print("no /joint_states with the six UR joints: is `./run.sh comms` "
+                  "(ros2 run ur7e_utils enable_comms) running?", file=sys.stderr)
             return 2
         bad = check_start(latest["q"])
         if bad:
@@ -190,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
         print(f"result: {st.status}")
         if st.status != "done":
-            print("stopped early: the arm holds where it is; tuck it the lab's way")
+            print("stopped early: the arm holds where it is; ./run.sh tuck brings it back")
         log.write(json.dumps({"event": "result", "trial": trial, "status": st.status}) + "\n")
         print(f"log: {log_path}\ndrawn path: python3 -m ur7e_draw.trace {log_path}")
         return 0 if st.status == "done" else 1
@@ -208,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     finally:
         log.close()
+        if log_path.stat().st_size == 0:
+            log_path.unlink()                    # refused before the header: leave no log
         ex.shutdown()
         node.destroy_node()
         rclpy.try_shutdown()
