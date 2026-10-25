@@ -57,6 +57,23 @@ speed_scaling`). Moving the slider mid-run just changes the pace, and pausing th
 pauses the drawing (stopped after 10 s paused). A number after `dry` or `draw` is only a
 cross-check. Ctrl-C at any time sends a hold at the current position.
 
+### Say hello (the website wave)
+
+With terminals A (comms) and B (validator) running and the arm at tuck (`./run.sh tuck`):
+
+```bash
+./run.sh alias      # once per computer: afterwards the word `run` does the line below
+run                 # = ./run.sh hello: 5 s countdown, then the arm raises its hand and waves
+```
+
+The arm lifts its tool ~0.4 m inside the validator's band (every joint within 0.40 rad of
+tuck), flaps the hand up and down 4 times (~0.5 Hz at 100 %, slower at lower sliders) and
+returns to tuck: ~10.5 s at 100 %, ~21 s at 50 %. Tested in the twin at 30 and 50 % slider
+(every controller variant finishes); at 70-100 % slower-servo variants trip the tracking guard,
+which stops and holds the arm, so keep the slider at 30-50 % until a real run says otherwise.
+Ctrl-C during the countdown aborts before anything moves; Ctrl-C later holds where it is.
+`./run.sh hello 10` gives a 10 s countdown. Logs go to `runs/hello_<time>.jsonl`.
+
 ### Where to stand or film
 
 The word reads correctly from in front of the tool, looking back at the robot (the side the

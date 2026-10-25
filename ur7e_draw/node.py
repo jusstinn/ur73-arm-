@@ -91,9 +91,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", type=Path, default=ROOT / "runs")
     ap.add_argument("--trial", default=None, help="log name (default: time stamp)")
     ap.add_argument("--dry-run", action="store_true", help="all checks, never publish")
+    ap.add_argument("--countdown", type=float, default=0.0,
+                    help="start after this many seconds of countdown instead of waiting for "
+                         "Enter (3..30; Ctrl-C during it aborts before anything moves)")
     a = ap.parse_args(argv)
     if a.speed_slider is not None and not 5 <= a.speed_slider <= 100:
         print("--speed-slider must be 5..100 (%)", file=sys.stderr)
+        return 2
+    if a.countdown and not 3 <= a.countdown <= 30:
+        print("--countdown must be 3..30 s (time to step back and reach the e-stop)",
+              file=sys.stderr)
         return 2
     plan = load(a.plan)
     bad = check_plan(plan)
@@ -213,8 +220,15 @@ def main(argv: list[str] | None = None) -> int:
                   f"{[round(x, 4) for x in m.points[0].positions]}\n  time_from_start "
                   f"{st.horizon_s:.3f} s, {RATE_HZ:.0f} messages/s")
             return 0
-        input("clear area, hand on the e-stop; Enter starts drawing ... ")
-        # nothing was spun while waiting for Enter: read the arm again before the first goal
+        if a.countdown:
+            print(f"clear area, hand on the e-stop: '{plan['word']}' starts in", flush=True)
+            for k in range(int(round(a.countdown)), 0, -1):
+                print(f"  {k} ...", flush=True)
+                spin_for(1.0)                    # keeps the joint states fresh meanwhile
+            print("  go", flush=True)
+        else:
+            input("clear area, hand on the e-stop; Enter starts drawing ... ")
+        # read the arm again before the first goal (nothing was spun while waiting for Enter)
         latest.pop("q", None)
         spin_for(0.3)
         if "q" not in latest:

@@ -230,3 +230,47 @@ def test_paused_program_refused(monkeypatch, tmp_path, small_plan, capsys):
     w = World(slider=0.0)
     assert run(monkeypatch, tmp_path, w, small_plan, "--speed-slider", "30") == 2
     assert "paused" in capsys.readouterr().err and w.sent == []
+
+
+def _no_enter(*a):
+    raise AssertionError("the countdown must not wait for Enter")
+
+
+def test_hello_waves_after_a_countdown(monkeypatch, tmp_path, capsys):
+    from ur7e_draw import hello
+    p = tmp_path / "hello.json"
+    p.write_text(json.dumps(hello.build(waves=1)))
+    w = World()
+    install_fake_ros(monkeypatch, w)
+    monkeypatch.setattr(builtins, "input", _no_enter)
+    from ur7e_draw import node
+    t0 = time.monotonic()
+    rc = node.main(["--plan", str(p), "--out", str(tmp_path), "--trial", "h",
+                    "--countdown", "3"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "3 ..." in out and "1 ..." in out and "go" in out
+    sent_after = w.sent                                   # nothing before the countdown ended
+    assert time.monotonic() - t0 > 3.0 and len(sent_after) > 50
+    assert all(ok for _, ok in w.sent)                    # the validator took every goal
+    assert np.max(np.abs(w.twin.q - kin.TUCK)) < 0.01
+
+
+def test_ctrl_c_during_the_countdown_moves_nothing(monkeypatch, tmp_path):
+    from ur7e_draw import hello
+    p = tmp_path / "hello.json"
+    p.write_text(json.dumps(hello.build(waves=1)))
+    w = World(interrupt_after=1.5)                         # inside the countdown
+    install_fake_ros(monkeypatch, w)
+    from ur7e_draw import node
+    rc = node.main(["--plan", str(p), "--out", str(tmp_path), "--trial", "h",
+                    "--countdown", "5"])
+    assert rc == 130
+    moved = [q for q, _ in w.sent if np.max(np.abs(np.asarray(q) - kin.TUCK_VAL)) > 1e-3]
+    assert moved == []                                     # at most a hold at tuck
+
+
+def test_countdown_bounds(monkeypatch, tmp_path):
+    install_fake_ros(monkeypatch, World())
+    from ur7e_draw import node
+    assert node.main(["--plan", "plans/hello.json", "--countdown", "1"]) == 2

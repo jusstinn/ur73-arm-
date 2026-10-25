@@ -8,6 +8,8 @@
 #   ./run.sh speed            terminal C: the robot's real speed scaling in % (pendant slider)
 #   ./run.sh dry  [slider%]   terminal C: ROS checks only (joint states, at tuck, validator, speed)
 #   ./run.sh draw [slider%]   terminal C: DRAWS ON THE ARM (Enter to start, Ctrl-C = hold)
+#   ./run.sh hello [secs]     terminal C: WAVES HELLO (countdown, default 5 s, then moves; Ctrl-C = hold)
+#   ./run.sh alias            once: makes the word `run` mean ./run.sh hello (new terminals)
 #   ./run.sh trace [log]      the drawn path of the last run (or of <log>) -> .drawn.svg/.json
 #   ./run.sh plan [args]      re-plan (e.g. --mirror, --scale 0.06); see python3 -m ur7e_draw.plan -h
 set -euo pipefail
@@ -82,6 +84,22 @@ case "$cmd" in
     ros_env; need_numpy
     python3 -m ur7e_draw.node $(slider_arg "${1:-}")
     ;;
+  hello)
+    ros_env; need_numpy
+    [ -f plans/hello.json ] || python3 -m ur7e_draw.hello >/dev/null
+    python3 -m ur7e_draw.node --plan plans/hello.json --countdown "${1:-5}" \
+      --trial "hello_$(date +%Y%m%d_%H%M%S)" "${@:2}"
+    ;;
+  alias)
+    line="alias run='$(pwd)/run.sh hello'"
+    if grep -qxF "$line" ~/.bashrc 2>/dev/null; then
+      echo "already set: $line"
+    else
+      echo "$line" >> ~/.bashrc
+      echo "added to ~/.bashrc: $line"
+    fi
+    echo "open a new terminal (or: source ~/.bashrc); then 'run' waves after a 5 s countdown"
+    ;;
   trace)
     need_numpy
     log="${1:-}"
@@ -98,6 +116,6 @@ case "$cmd" in
     python3 -m ur7e_draw.plan "$@"
     ;;
   *)
-    sed -n '2,12p' "$0"
+    sed -n '2,14p' "$0"
     ;;
 esac
