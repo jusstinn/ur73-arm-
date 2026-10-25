@@ -27,6 +27,9 @@ from .plan import PLAN_RADIUS, ROOT, load
 from .stream import CLAMP_RADIUS, RATE_HZ, START_TOL, STALE_S, TICK_S, Streamer
 
 
+DISCOVERY_S = 5.0    # s to wait for /joint_states and the validator at startup
+
+
 def check_plan(plan: dict) -> str | None:
     Q = plan["q"]
     if Q.ndim != 2 or Q.shape[1] != 6 or not np.all(np.isfinite(Q)):
@@ -125,10 +128,17 @@ def main(argv: list[str] | None = None) -> int:
             ex.spin_once(timeout_sec=0.002)
 
     try:
-        spin_for(1.0)
+        # DDS discovery on the lab network can take seconds: wait for the first reading and
+        # for the validator's subscription before judging either missing
+        end = time.monotonic() + DISCOVERY_S
+        while time.monotonic() < end and ("q" not in latest or
+                                          pub.get_subscription_count() == 0):
+            spin_for(0.1)
+        spin_for(0.2)
         if "q" not in latest:
-            print("no /joint_states with the six UR joints: is `./run.sh comms` "
-                  "(ros2 run ur7e_utils enable_comms) running?", file=sys.stderr)
+            print(f"no /joint_states with the six UR joints in {DISCOVERY_S:.0f} s: is "
+                  "`./run.sh comms` (ros2 run ur7e_utils enable_comms) still running? check "
+                  "with: ros2 topic echo /joint_states --once", file=sys.stderr)
             return 2
         bad = check_start(latest["q"])
         if bad:

@@ -80,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         plan = load(a.plan or head["plan"])
         ticks = [r for r in rows if r.get("q") is not None and "tau" in r]
+        if not ticks:
+            print(f"{a.log} has no motion (a dry run, or refused before Enter): nothing to trace")
+            return 2
         t = np.array([r["t_rel"] for r in ticks])
         Q = np.array([r["q"] for r in ticks])
         k = np.clip((np.array([r["tau"] for r in ticks]) * plan["hz"]).astype(int), 0,

@@ -168,6 +168,8 @@ def test_dry_run_publishes_nothing(monkeypatch, tmp_path, small_plan, capsys):
     w = World()
     assert run(monkeypatch, tmp_path, w, small_plan, "--speed-slider", "30", "--dry-run") == 0
     assert w.sent == [] and "dry run OK" in capsys.readouterr().out
+    from ur7e_draw import trace
+    assert trace.main([str(tmp_path / "t.jsonl")]) == 2       # a dry run has nothing to trace
 
 
 def test_refuses_without_validator(monkeypatch, tmp_path, small_plan):

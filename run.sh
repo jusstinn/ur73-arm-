@@ -83,10 +83,10 @@ case "$cmd" in
     log="${1:-}"
     if [ -z "$log" ]; then
       for f in $(ls -t runs/*.jsonl 2>/dev/null || true); do
-        if grep -q '"event": "header"' "$f"; then log="$f"; break; fi
+        if grep -q '"tau"' "$f"; then log="$f"; break; fi      # a run that moved
       done
     fi
-    [ -n "$log" ] || { echo "no run logs in runs/ yet (a run that never started leaves none)" >&2; exit 2; }
+    [ -n "$log" ] || { echo "no drawing runs in runs/ yet (dry runs and refused runs have nothing to trace)" >&2; exit 2; }
     python3 -m ur7e_draw.trace "$log"
     ;;
   plan)
