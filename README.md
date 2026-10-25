@@ -1,7 +1,8 @@
 # UR7e writes "future" in the air
 
-The lab UR7e writes a cursive **future**, about 33 × 15 cm, in the air in front of its tuck
-pose, in **under a minute** (56 s at 30 % speed slider, 34 s at 50 %). Every command goes
+The lab UR7e writes a cursive **future** with its gripper fingertips, about 33 × 15 cm, in the
+air in front of the arm with the word's centre 20 cm above the tuck fingertip position, in
+**under a minute** (58 s at 30 % speed slider, 35 s at 50 %). Every command goes
 through the course's `validate_trajectory` node. The gripper stays on and isn't commanded.
 
 ![preview](media/future_preview.png)
@@ -33,18 +34,18 @@ External Control program must be running.
    ```bash
    ./run.sh validator    # = ros2 run joint_control validate_trajectory
    ```
-3. Set the pendant's **speed slider to 30 %** (56 s run; 50 % = 34 s; tested range 30-50 %).
+3. Set the pendant's **speed slider to 30 %** (58 s run; 50 % = 35 s; tested range 30-50 %).
    Check what the robot actually reports with `./run.sh speed` (data: 30.0). The first lab
    run stopped because the robot was at ~6 % while 30 was typed. The node now reads this value
    itself and follows it live.
-   Clear about 45 cm wide, 30 cm tall and 10 cm deep around the gripper, plus the arm's space
-   between there and the base.
+   Clear about 45 cm wide and 10 cm deep around the gripper, from tuck height up to 35 cm
+   above it, plus the arm's space between there and the base.
 4. **Terminal C**:
    ```bash
    ./run.sh check        # no ROS: should print "all variants finish" twice
    ./run.sh tuck         # = ros2 run ur7e_utils tuck (moves the arm to tuck)
    ./run.sh dry          # ROS checks only, moves nothing: prints the robot's speed + "dry run OK"
-   ./run.sh draw         # hand on the e-stop, Enter starts; ~56 s at 30 %, ends back at tuck
+   ./run.sh draw         # hand on the e-stop, Enter starts; ~58 s at 30 %, ends back at tuck
    ./run.sh trace        # the path it actually drew -> runs/<name>.drawn.svg / .drawn.json
    ```
 5. To bring the data home:
@@ -88,12 +89,15 @@ Then `./run.sh check` and run as above. The planner refuses any plan that leaves
 ## What it does
 
 - **`ur7e_draw/plan.py`**: the letters (`letters.py`, one cursive stroke plus the f and t
-  crossbars) go on the vertical plane through the tuck flange position. IK (UR DH,
-  damped least squares) runs at 100 Hz with the tool held at its tuck orientation. The flange
-  writes at 20 cm/s (at 100 % slider), comes to rest at sharp corners, and arcs 3 cm back
-  toward the base between strokes. The plan starts and ends exactly at tuck: 16.8 s at
-  100 %. Checks: every joint within 0.40 rad of tuck (max used: 0.28), joint speed
-  ≤ 0.8 rad/s (max used: 0.56, against a UR7e limit of 3.14), fingertips ≥ 0.15 m above
+  crossbars) go on a vertical plane, centred 0.20 m above the tuck fingertip position
+  (`--offset right,up`). IK runs at 100 Hz on the fingertip position only (UR DH, null-space
+  pull toward tuck), so the gripper tilts (up to 31°) and the joints share the motion. That's
+  what lets the word sit higher. The ceiling is about +0.30 m before the 0.40 rad margin, and
+  the validator's 0.5 rad comes at about +0.40 m. The fingertips write at 20 cm/s (at 100 %
+  slider), come to rest at sharp corners, and arc 3 cm back toward the base between strokes.
+  The plan starts and ends exactly at tuck: 17.4 s at 100 %. Checks: every joint within
+  0.40 rad of tuck (max used: 0.24), joint speed ≤ 0.8 rad/s (max used: 0.43, against a UR7e
+  limit of 3.14), fingertips ≥ 0.15 m above
   the table (gripper 0.14 m from lab5; table at z ≈ −0.20 m estimated from lab5's cube
   pose; `--gripper` to change), IK error < 0.01 mm. The result is `plans/future.json`.
 - **`ur7e_draw/stream.py`**: the validator only takes one point, zero velocities, the

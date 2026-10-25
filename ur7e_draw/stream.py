@@ -199,7 +199,7 @@ def simulate(plan: dict, twin: JTCTwin, jitter_s: float = 0.0, seed: int = 0) ->
     for tau, q in qs:
         k = min(int(tau * plan["hz"]), len(plan["pen"]) - 1)
         if plan["pen"][k]:
-            p = fk(q)[0]
+            p = fk(q, plan.get("pen_offset", 0.0))[0]
             errs.append(float(np.min(np.linalg.norm(pen_pts - p, axis=1))))
     return {"status": st.status, "dev_max_rad": round(max(devs), 4) if devs else None,
             "shape_err_mm_max": round(1e3 * max(errs), 2) if errs else None,

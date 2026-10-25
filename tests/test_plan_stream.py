@@ -47,7 +47,7 @@ def test_gripper_clearance(committed):
     c = committed["checks"]
     assert c["fingertip_above_table_m"] >= P.CLEARANCE_M
     with pytest.raises(ValueError, match="table"):
-        P.build(gripper=0.45)
+        P.build(offset=(0.0, -0.35))
 
 
 def test_planner_refuses_too_big():
@@ -114,11 +114,14 @@ def test_wrong_slider_never_smears(committed, restart, actual):
             tw.command(g)
         k = min(int(rec["tau"] * committed["hz"]), len(committed["pen"]) - 1)
         if committed["pen"][k] and st.status is None:
-            errs.append(np.min(np.linalg.norm(pen_pts - kin.fk(tw.q)[0], axis=1)))
+            errs.append(np.min(np.linalg.norm(pen_pts - kin.fk(tw.q, committed["pen_offset"])[0],
+                                              axis=1)))
         for _ in range(int(S.TICK_S / tw.dt)):
             tw.step()
         t += S.TICK_S
-    assert st.status == "tracking" or (st.status == "done" and max(errs) < 0.006)
+    # (only the fallback when the driver doesn't report its scaling; normally the node follows
+    # the robot's live value). Errors at the fingertips, 14 cm past the flange.
+    assert st.status == "tracking" or (st.status == "done" and max(errs) < 0.010)
 
 
 def test_trace_plan_only(tmp_path):

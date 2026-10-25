@@ -3,12 +3,15 @@
     python3 -m ur7e_draw.plan                       # writes plans/future.json, prints checks
     python3 -m ur7e_draw.plan --scale 0.06 --speed 0.06 --out plans/small.json
 
-The arm starts at tuck (flange ~0.61 m out, 0.43 m up, tool pointing down). The word is written
-by the flange (tool0) in the vertical plane through the tuck flange position, facing outward
-(away from the base): stand beyond the tool and look back at the robot to read it, or pass
---mirror to make it read from behind the arm. The tool keeps its tuck orientation the whole
-time. Between strokes the flange arcs back `--lift` m toward the base (pen up). The plan starts
-and ends exactly at tuck.
+The arm starts at tuck (flange ~0.61 m out, 0.43 m up, gripper pointing down). The word is
+written by the gripper FINGERTIPS (`--gripper` m out from the flange) in the vertical plane
+through the tuck fingertip position, its centre `--offset` right,up from there (default 0.20 m
+up), facing outward (away from the base): stand beyond the gripper and look back at the robot
+to read it, or pass --mirror to read it from behind the arm. Position-only IK: the gripper may
+tilt (~30 deg at +0.20 m), which is what lets every joint stay close to tuck while the word goes
+higher (ceiling ~ +0.30 m before PLAN_RADIUS; the validator's 0.5 rad at ~ +0.40 m). Between
+strokes the fingertips arc back `--lift` m toward the base (pen up). The plan starts and ends
+exactly at tuck.
 
 Every joint stays within PLAN_RADIUS of tuck (the node clamps at 0.45, the course validator
 refuses past 0.5); the planner refuses a plan that does not.
@@ -22,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .kin import TUCK, UR_JOINTS, fk, ik
+from .kin import TUCK, UR_JOINTS, fk, ik_pos
 from .letters import stroke_curves, stroke_pieces, resample
 
 PLAN_HZ = 100.0
@@ -84,9 +87,9 @@ def word_strokes(p0: np.ndarray, scale: float, offset: tuple[float, float],
 
 
 def build(scale: float = 0.07, speed: float = 0.2, accel: float = 0.6, lift: float = 0.03,
-          offset: tuple[float, float] = (0.0, 0.0), mirror: bool = False,
+          offset: tuple[float, float] = (0.0, 0.20), mirror: bool = False,
           up_speed: float = 0.3, gripper: float = GRIPPER_M) -> dict:
-    p0, R = fk(TUCK)
+    p0, R0 = fk(TUCK, gripper)                                  # fingertips at tuck
     _, _, outward = word_axes(p0, mirror)
     back = -lift * outward                                       # pen up: toward the base
     strokes = word_strokes(p0, scale, offset, mirror)
@@ -98,7 +101,7 @@ def build(scale: float = 0.07, speed: float = 0.2, accel: float = 0.6, lift: flo
         nonlocal q, worst
         L = float(np.sum(np.linalg.norm(np.diff(pts, axis=0), axis=1)))
         for p in along(pts, profile(L, speed if pen else up_speed, accel, PLAN_HZ)):
-            q, e = ik(q, p, R)
+            q, e = ik_pos(q, p, gripper)
             worst = max(worst, e)
             rows.append((q.copy(), p, pen, sid))
 
@@ -133,7 +136,9 @@ def build(scale: float = 0.07, speed: float = 0.2, accel: float = 0.6, lift: flo
     tip = np.array([r[1] for r in rows])
     dev = np.abs(Q - TUCK).max(0)
     # the tool keeps its tuck orientation, so the fingertips trace the same word, offset
-    finger_z = float(min(fk(qq, gripper)[0][2] for qq in Q[::10]))
+    finger_z = float(tip[:, 2].min())                           # tip = the fingertips
+    tilt = max(float(np.degrees(np.arccos(np.clip(fk(qq)[1][:, 2] @ R0[:, 2], -1, 1))))
+               for qq in Q[::10])
     speed_j = np.abs(np.diff(Q, axis=0)).max(0) * PLAN_HZ
     allpts = np.vstack([c for s in strokes for c in s])
     checks = {
@@ -144,10 +149,11 @@ def build(scale: float = 0.07, speed: float = 0.2, accel: float = 0.6, lift: flo
         "max_joint_speed_rad_s": dict(zip(UR_JOINTS, speed_j.round(3).tolist())),
         "word_box_m": {"width": round(float(np.ptp((allpts - p0) @ word_axes(p0, mirror)[0])), 3),
                        "height": round(float(np.ptp(allpts[:, 2])), 3)},
-        "flange_z_min_m": round(float(tip[:, 2].min()), 3),
         "fingertip_z_min_m": round(finger_z, 3),
         "fingertip_above_table_m": round(finger_z - TABLE_Z_M, 3),
-        "tuck_flange_m": p0.round(4).tolist(),
+        "gripper_tilt_max_deg": round(tilt, 1),
+        "tuck_fingertip_m": p0.round(4).tolist(),
+        "word_centre_above_tuck_m": offset[1],
     }
     problems = []
     if dev.max() > PLAN_RADIUS:
@@ -161,7 +167,9 @@ def build(scale: float = 0.07, speed: float = 0.2, accel: float = 0.6, lift: flo
     if problems:
         raise ValueError("plan refused: " + "; ".join(problems))
     return {"word": "future", "hz": PLAN_HZ, "joint_order": list(UR_JOINTS),
-            "frame": "UR base (DH) frame, m; tip = flange (tool0)",
+            "frame": "UR base (DH) frame, m; tip = gripper fingertips (pen_offset m out "
+                     "along the flange axis)",
+            "pen_offset": gripper,
             "params": {"scale": scale, "speed": speed, "accel": accel, "lift": lift,
                        "offset": list(offset), "mirror": mirror, "up_speed": up_speed,
                        "gripper": gripper},
@@ -193,7 +201,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--gripper", type=float, default=GRIPPER_M,
                     help="flange to fingertips, m (for the table-clearance check and traces)")
     ap.add_argument("--lift", type=float, default=0.03, help="pen-up pull-back, m")
-    ap.add_argument("--offset", default="0,0", help="word centre from the tuck flange: right,up m")
+    ap.add_argument("--offset", default="0,0.20",
+                    help="word centre from the tuck fingertips: right,up m (ceiling ~ up 0.30)")
     ap.add_argument("--mirror", action="store_true", help="read from behind the arm")
     a = ap.parse_args(argv)
     off = tuple(float(x) for x in a.offset.split(","))

@@ -79,3 +79,22 @@ def ik(q: np.ndarray, p: np.ndarray, R: np.ndarray, pen: float = 0.0, iters: int
         J = jacobian(q, pen)
         q += J.T @ np.linalg.solve(J @ J.T + damp * np.eye(6), e)
     return q, float(np.linalg.norm(p - fk(q, pen)[0]))
+
+
+def ik_pos(q: np.ndarray, p: np.ndarray, pen: float = 0.0, pull: np.ndarray | None = None,
+           w_pull: float = 0.3, iters: int = 60) -> tuple[np.ndarray, float]:
+    """Position-only IK for the point `pen` m out along the flange axis, warm-started at q.
+    The free orientation is spent staying close to `pull` (tuck): a null-space step toward it
+    every iteration, so the joints spread the motion and the gripper tilts a little.
+    -> (q, position error m)."""
+    q = np.array(q, dtype=float)
+    pull = TUCK if pull is None else pull
+    for _ in range(iters):
+        e = p - fk(q, pen)[0]
+        J = jacobian(q, pen)[:3]
+        Jp = J.T @ np.linalg.inv(J @ J.T + 1e-6 * np.eye(3))
+        dq = Jp @ e + (np.eye(6) - Jp @ J) @ (w_pull * (pull - q))
+        q += dq
+        if np.linalg.norm(e) < 1e-9 and np.linalg.norm(dq) < 1e-9:
+            break
+    return q, float(np.linalg.norm(p - fk(q, pen)[0]))
